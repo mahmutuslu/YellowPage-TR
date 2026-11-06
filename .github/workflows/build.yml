@@ -3,6 +3,8 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
+    paths-ignore:
+      - 'build-status.json'
 permissions:
   contents: read
 jobs:
@@ -33,3 +35,43 @@ jobs:
           name: YellowPage-TR-LSPosed-v0.1-debug-APK
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
+
+  report:
+    if: ${{ always() }}
+    needs: [build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: true
+      - name: Write status for remote diagnosis
+        env:
+          BUILD_RESULT: ${{ needs.build.result }}
+          RUN_ID: ${{ github.run_id }}
+          SOURCE_SHA: ${{ github.sha }}
+          REPO: ${{ github.repository }}
+        run: |
+          python3 - <<'PY'
+          import os,json
+          result={
+            "build_result":os.environ["BUILD_RESULT"],
+            "run_id":int(os.environ["RUN_ID"]),
+            "run_url":"https://github.com/%s/actions/runs/%s" % (os.environ["REPO"],os.environ["RUN_ID"]),
+            "source_sha":os.environ["SOURCE_SHA"]
+          }
+          with open("build-status.json","w",encoding="utf-8") as f:
+            json.dump(result,f,indent=2)
+            f.write("\n")
+          print(result)
+          PY
+      - name: Publish status (skip recursive builds)
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add build-status.json
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m "ci: record build result [skip ci]"
+          git push origin HEAD:main
