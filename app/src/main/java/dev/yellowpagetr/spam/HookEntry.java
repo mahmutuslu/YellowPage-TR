@@ -7,7 +7,8 @@ import de.robv.android.xposed.XposedHelpers;
 import de.robv.android.xposed.callbacks.XC_LoadPackage;
 /** Experimentally alter existing Xiaomi number-result objects only. */
 public final class HookEntry implements IXposedHookLoadPackage {
-    private static final String LOG="YellowPageTR/0.1";
+    private static final String LOG="YellowPageTR/0.2";
+    private static final java.util.concurrent.atomic.AtomicInteger TRACE_COUNT = new java.util.concurrent.atomic.AtomicInteger();
     @Override public void handleLoadPackage(XC_LoadPackage.LoadPackageParam param) {
         String pkg=param.packageName;
         if (!"com.miui.yellowpage".equals(pkg) && !"com.android.contacts".equals(pkg)
@@ -20,7 +21,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
     private static int install(ClassLoader loader,String name,boolean queryResult) {
         try {
             Class<?> type=XposedHelpers.findClassIfExists(name,loader);
-            if(type==null) return 0;
+            if(type==null) { XposedBridge.log(LOG+": classMissing="+name); return 0; }
             int hooked=0;
             hooked+=hook(type,"isAntispam",true);
             hooked+=hook(type,"isMarkedSuspect",true);
@@ -43,9 +44,20 @@ public final class HookEntry implements IXposedHookLoadPackage {
         try {
             return XposedBridge.hookAllMethods(type,name,new XC_MethodHook() {
                 @Override protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                    if (!matches(param.thisObject)) return;
-                    if(flag && (param.getResult()==null || param.getResult() instanceof Boolean)) param.setResult(true);
-                    else if(!flag && (param.getResult()==null || param.getResult() instanceof String)) param.setResult("Olası spam (TR)");
+                    boolean matched = matches(param.thisObject);
+                    // Diagnostic only: never log the telephone number or its digits.
+                    int count = TRACE_COUNT.incrementAndGet();
+                    if (count <= 100) XposedBridge.log(LOG+": call="+type.getName()+"."+name+" matched="+matched);
+                    if (!matched) return;
+                    boolean changed = false;
+                    if(flag && (param.getResult()==null || param.getResult() instanceof Boolean)) {
+                        param.setResult(true);
+                        changed = true;
+                    } else if(!flag && (param.getResult()==null || param.getResult() instanceof String)) {
+                        param.setResult("Olası spam (TR)");
+                        changed = true;
+                    }
+                    if (changed) XposedBridge.log(LOG+": override="+name+" matched=true");
                 }
             }).size();
         } catch(Throwable ignored) { return 0; }
