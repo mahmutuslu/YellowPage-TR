@@ -1,0 +1,3 @@
+Spam data originates from symbuzzer/Turkish-Spam-Numbers (SpamBlocker.csv), available under GPL-3.0.
+Original: https://github.com/symbuzzer/Turkish-Spam-Numbers
+The data is unverified community reporting, not proof of wrongdoing.
