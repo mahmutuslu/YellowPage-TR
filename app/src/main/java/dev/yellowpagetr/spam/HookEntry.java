@@ -14,7 +14,7 @@ import de.robv.android.xposed.XposedHelpers;
 import de.robv.android.xposed.callbacks.XC_LoadPackage;
 /** Experimentally alter existing Xiaomi number-result objects only. */
 public final class HookEntry implements IXposedHookLoadPackage {
-    private static final String LOG="YellowPageTR/0.6";
+    private static final String LOG="YellowPageTR/0.7";
     private static final java.util.concurrent.atomic.AtomicInteger TRACE_COUNT = new java.util.concurrent.atomic.AtomicInteger();
     private static final java.util.concurrent.atomic.AtomicInteger PROVIDER_TRACE_COUNT = new java.util.concurrent.atomic.AtomicInteger();
     private static final java.util.concurrent.atomic.AtomicInteger RESOLVER_TRACE_COUNT = new java.util.concurrent.atomic.AtomicInteger();
@@ -29,6 +29,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
         total+=install(param.classLoader,"com.miui.yellowpage.tool.QueryNumberResult",true);
         if ("com.miui.yellowpage".equals(pkg)) total+=installProvider(param.classLoader);
         total+=installResolver(param.classLoader);
+        if ("com.android.incallui".equals(pkg)) total+=installIncomingCallCard(param.classLoader);
         // Entry points verified in the supplied Xiaomi Contacts APK.
         if ("com.android.contacts".equals(pkg)) {
             total+=observe(param.classLoader,
@@ -114,6 +115,75 @@ public final class HookEntry implements IXposedHookLoadPackage {
         } catch(Throwable e) {
             XposedBridge.log(LOG+": dialerNotice error="+e.getClass().getSimpleName());
         }
+    }
+
+    /**
+     * Native incoming-call label proof-of-concept for the inspected InCallUI APK.
+     * No outgoing calls, call blocking, caller name, avatar, or call state changes.
+     * Do not expose the phone number in LSPosed logs.
+     */
+    private static int installIncomingCallCard(ClassLoader loader) {
+        final String cls="com.android.incallui.model.CallCardInfo";
+        try {
+            Class<?> type=XposedHelpers.findClassIfExists(cls,loader);
+            if(type==null) {
+                XposedBridge.log(LOG+": incomingCardClassMissing");
+                return 0;
+            }
+            int count=XposedBridge.hookAllMethods(type,"createCallCardInfo",new XC_MethodHook() {
+                private final java.util.concurrent.atomic.AtomicInteger traces=
+                    new java.util.concurrent.atomic.AtomicInteger();
+                @Override protected void afterHookedMethod(MethodHookParam p) {
+                    try {
+                        Object card=p.getResult();
+                        Object call=p.args!=null && p.args.length>0 ? p.args[0] : null;
+                        Object cache=p.args!=null && p.args.length>1 ? p.args[1] : null;
+                        if(card==null || call==null) return;
+                        boolean incoming=readBool(card,"isIncoming");
+                        boolean emergency=readBool(card,"isEmergencyNumber");
+                        boolean matched=SpamDb.contains(readString(card,"phoneNumber"));
+                        if(!matched && cache!=null) matched=SpamDb.contains(readString(cache,"number"));
+                        if(!matched) {
+                            try {
+                                Object num=XposedHelpers.callMethod(call,"getNumber");
+                                matched=num instanceof String && SpamDb.contains((String)num);
+                            } catch(Throwable ignored) {}
+                        }
+                        if(traces.incrementAndGet()<=80)
+                            XposedBridge.log(LOG+": incomingCard created=true incoming="+incoming+
+                                " emergency="+emergency+" matched="+matched);
+                        if(!incoming || emergency || !matched) return;
+                        java.lang.reflect.Field title=card.getClass().getDeclaredField("markTitle");
+                        title.setAccessible(true);
+                        Object existing=title.get(card);
+                        if(existing instanceof String && !((String)existing).trim().isEmpty()) {
+                            XposedBridge.log(LOG+": incomingCard existingLabelPreserved=true");
+                            return;
+                        }
+                        title.set(card,"Olası spam (TR)");
+                        XposedBridge.log(LOG+": incomingCard nativeLabelSet=true");
+                    } catch(Throwable error) {
+                        XposedBridge.log(LOG+": incomingCard error="+error.getClass().getSimpleName());
+                    }
+                }
+            }).size();
+            XposedBridge.log(LOG+": incomingCardHooks="+count);
+            return count;
+        } catch(Throwable e) {
+            XposedBridge.log(LOG+": incomingCardHookError="+e.getClass().getSimpleName());
+            return 0;
+        }
+    }
+    private static boolean readBool(Object target,String field) throws Exception {
+        java.lang.reflect.Field f=target.getClass().getDeclaredField(field);
+        f.setAccessible(true);
+        return f.getBoolean(target);
+    }
+    private static String readString(Object target,String field) throws Exception {
+        java.lang.reflect.Field f=target.getClass().getDeclaredField(field);
+        f.setAccessible(true);
+        Object value=f.get(target);
+        return value instanceof String?(String)value:null;
     }
 
     /** Observe YellowPage's incoming ContentProvider requests; never print URIs or digits. */
