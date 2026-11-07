@@ -3,6 +3,10 @@ import java.lang.reflect.Method;
 import android.net.Uri;
 import android.os.Bundle;
 import android.database.Cursor;
+import android.content.Context;
+import android.os.Handler;
+import android.os.Looper;
+import android.widget.Toast;
 import de.robv.android.xposed.IXposedHookLoadPackage;
 import de.robv.android.xposed.XC_MethodHook;
 import de.robv.android.xposed.XposedBridge;
@@ -10,11 +14,12 @@ import de.robv.android.xposed.XposedHelpers;
 import de.robv.android.xposed.callbacks.XC_LoadPackage;
 /** Experimentally alter existing Xiaomi number-result objects only. */
 public final class HookEntry implements IXposedHookLoadPackage {
-    private static final String LOG="YellowPageTR/0.5";
+    private static final String LOG="YellowPageTR/0.6";
     private static final java.util.concurrent.atomic.AtomicInteger TRACE_COUNT = new java.util.concurrent.atomic.AtomicInteger();
     private static final java.util.concurrent.atomic.AtomicInteger PROVIDER_TRACE_COUNT = new java.util.concurrent.atomic.AtomicInteger();
     private static final java.util.concurrent.atomic.AtomicInteger RESOLVER_TRACE_COUNT = new java.util.concurrent.atomic.AtomicInteger();
     private static final java.util.concurrent.atomic.AtomicInteger ENTRY_TRACE_COUNT = new java.util.concurrent.atomic.AtomicInteger();
+    private static final java.util.concurrent.atomic.AtomicLong LAST_NOTICE_AT = new java.util.concurrent.atomic.AtomicLong(0L);
     @Override public void handleLoadPackage(XC_LoadPackage.LoadPackageParam param) {
         String pkg=param.packageName;
         if (!"com.miui.yellowpage".equals(pkg) && !"com.android.contacts".equals(pkg)
@@ -53,8 +58,10 @@ public final class HookEntry implements IXposedHookLoadPackage {
             int count=XposedBridge.hookAllMethods(target,method,new XC_MethodHook() {
                 @Override protected void beforeHookedMethod(MethodHookParam p) {
                     try {
+                        boolean matched=inputMatches(p.args);
                         if(ENTRY_TRACE_COUNT.incrementAndGet()<=120)
-                            XposedBridge.log(LOG+": entry="+label+" inputMatch="+inputMatches(p.args));
+                            XposedBridge.log(LOG+": entry="+label+" inputMatch="+matched);
+                        if("t9Query".equals(label) && matched) showDialerNotice();
                     } catch(Throwable ignored) {}
                 }
                 @Override protected void afterHookedMethod(MethodHookParam p) {
@@ -72,6 +79,40 @@ public final class HookEntry implements IXposedHookLoadPackage {
         } catch(Throwable e) {
             XposedBridge.log(LOG+": entryError="+label+" type="+e.getClass().getSimpleName());
             return 0;
+        }
+    }
+
+    /**
+     * v0.6 dialer proof-of-concept. A short on-screen toast, NOT a system
+     * caller-ID label, and no call blocking. Shows at most once every 10s.
+     * No number is sent or written to log.
+     */
+    private static void showDialerNotice() {
+        try {
+            final long now=android.os.SystemClock.elapsedRealtime();
+            long previous=LAST_NOTICE_AT.get();
+            if(now-previous<10000L || !LAST_NOTICE_AT.compareAndSet(previous,now)) return;
+            Class<?> thread=Class.forName("android.app.ActivityThread");
+            java.lang.reflect.Method current=thread.getDeclaredMethod("currentApplication");
+            current.setAccessible(true);
+            Object value=current.invoke(null);
+            if(!(value instanceof Context)) {
+                XposedBridge.log(LOG+": dialerNotice noApplicationContext");
+                return;
+            }
+            final Context context=(Context)value;
+            new Handler(Looper.getMainLooper()).post(new Runnable() {
+                @Override public void run() {
+                    try {
+                        Toast.makeText(context,"Olası spam (TR)",Toast.LENGTH_LONG).show();
+                        XposedBridge.log(LOG+": dialerNotice shown=true");
+                    } catch(Throwable e) {
+                        XposedBridge.log(LOG+": dialerNotice error="+e.getClass().getSimpleName());
+                    }
+                }
+            });
+        } catch(Throwable e) {
+            XposedBridge.log(LOG+": dialerNotice error="+e.getClass().getSimpleName());
         }
     }
 
