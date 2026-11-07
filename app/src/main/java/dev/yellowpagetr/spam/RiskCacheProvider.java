@@ -8,6 +8,7 @@ import android.net.Uri;
 import android.os.Binder;
 import android.os.Bundle;
 import android.os.Process;
+import android.os.ResultReceiver;
 
 /**
  * Read-only local lookup IPC for Xiaomi's scoped caller UI.
@@ -26,15 +27,25 @@ public final class RiskCacheProvider extends ContentProvider {
         if(packages==null) return false;
         for(String pkg:packages)
             if("com.android.incallui".equals(pkg) ||
-               "com.android.contacts".equals(pkg)) return true;
+               "com.android.contacts".equals(pkg) ||
+               "com.miui.yellowpage".equals(pkg)) return true;
         return false;
     }
     @Override public Bundle call(String method,String arg,Bundle extras) {
         if(!authorized()) throw new SecurityException("Not a permitted Xiaomi caller");
         Bundle out=new Bundle();
-        if(!"hasRisk".equals(method) || extras==null) return out;
+        if(extras==null) return out;
+        if(!"hasRisk".equals(method) && !"checkAndFetch".equals(method)) return out;
         String phone=extras.getString("phone");
         out.putBoolean("risk",OpenSpamCache.hasRisk(getContext(),phone));
+        out.putBoolean("fresh",OpenSpamCache.hasFreshResult(getContext(),phone));
+        if("checkAndFetch".equals(method) && !out.getBoolean("fresh",false)) {
+            // This is asynchronous. Never wait for the API on an incoming call.
+            ResultReceiver callback=null;
+            try {callback=extras.getParcelable("callback");}
+            catch(Throwable ignored) {}
+            OpenSpamAutoLookup.schedule(getContext(),phone,callback);
+        }
         return out;
     }
     @Override public Cursor query(Uri uri,String[] projection,String selection,
