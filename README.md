@@ -1,62 +1,33 @@
-# YellowPage TR v1.2 — Experimental LSPosed module
-This project is a test harness for Xiaomi YellowPage on Xiaomi HyperOS. No Android Studio required.
-## Scope
-- 201 community-reported Turkish phone numbers stored on-device (GPL-3.0 upstream).
-- Tries overriding existing Xiaomi `YellowPagePhone` and `QueryNumberResult` metadata for matching numbers.
-- Does not patch any original system APK, block calls, or access Google Dialer data. Optional user-initiated OpenSpam HTTPS lookups require INTERNET permission; no phone/contacts runtime permissions are requested.
-- Xiaomi's native incoming-call extra-info label was visually verified on HyperOS 4 with the optional two-minute test preview. Automatic real caller number match remains experimental.
-## Build
-GitHub Actions > Build YellowPage TR LSPosed APK > run workflow; download Artifacts > YellowPage-TR-LSPosed-v1.2-debug-APK.
-Android Studio is not needed.
-## Device test
-Install debug APK, enable it in LSPosed, and scope only the listed Xiaomi packages that actually exist on your phone. Reboot or restart target processes. App UI tests the local CSV only. LSPosed logs: `YellowPageTR/1.2`; `hooks=0` means no matched class in this process.
-Please test using a number you control. Unknown names in an open spam list may be inaccurate. Do not depend on this experiment for emergency or business calls.
-## License
-Bundled community data is sourced from https://github.com/symbuzzer/Turkish-Spam-Numbers (GPL-3.0). See LICENSES/.
+# YellowPage TR v1.3 — API anahtarsız Xiaomi YellowPage spam uyarıları
 
-## v0.2 diagnostic test
-When a YellowPage/Contacts/InCallUI process calls a hooked number-result method, LSPosed modules log a line with `call=<method> matched=true/false`; matching local-list numbers also log `override=<method> matched=true`. The first 100 invocations per process are traced, without the actual telephone number or its digits. Hooks are installed only if the class exists. For a safe test, search a listed number in the Xiaomi Phone/Kişiler interface **without placing any call**, then inspect `/data/adb/lspd/log/modules_*.log`. If no `call=` appears, that screen may use a different API path. This does not confirm that the incoming-call UI renders the spam label.
+Xiaomi 15 Ultra / HyperOS 4 için deneysel **LSPosed** modülü. Xiaomi'nin orijinal Telefon, YellowPage ve gelen arama ekranları kullanılmaya devam eder. Modül bağımsız bir çevirici, Google Telefon veya çağrı engelleyici değildir.
 
-## v0.3 provider trace
-- Observes `YellowPageProvider.query` and YellowPage/Antispam `ContentResolver.query` calls in scoped processes.
-- Records only hook counts and whether a relevant query occurred; **does not record telephone numbers, URIs, or query arguments**.
-- Check `YellowPageTR/0.3` in `/data/adb/lspd/log/modules_*.log` after using the original Xiaomi Phone or YellowPage search UI; no need to place a call.
-- Results are diagnostics, **not** evidence the native incoming-call UI shows a spam warning.
+## Kur ve unut
 
-## v0.4 privacy-safe cursor trace
-- The YellowPage ContentProvider is now observed **before and after** query execution.
-- `inputMatch=true` means a local-list number was encountered **in one of the visible query arguments**; `false` does not prove there was no number, since an application may use indirect storage or different encoding.
-- `providerResult cursor=true fields=[...]` reports a maximum of 20 sanitized column **names**, never data rows or phone numbers.
-- No call blocking or network connection is added.
-- v0.4 remains experimental: some Xiaomi processes may use a different path and incoming-call screen display is not established.
+1. GitHub Actions'tan `YellowPage-TR-LSPosed-v1.3-debug-APK` indirip yükle.
+2. LSPosed > YellowPage TR > **Önerilen kapsam**'ta `com.android.contacts`, `com.android.incallui`, `com.miui.yellowpage` seçili olsun. Modül scope öneriyor; LSPosed'in mevcut kullanıcı kapsamını kendiliğinden değiştirmesi garanti edilmez.
+3. Telefonu **bir kez yeniden başlat**. Sonrasında açılışta ve paket güncellemesinde arka plan yenileme işi otomatik planlanır; uygulamayı açmak, API anahtarı girmek, numara yazmak gerekmez.
+4. Android JobScheduler internet bağlantısı varken yaklaşık 24 saatte bir güncelleme dener. İşletim sistemi, pil ve ağ durumuna göre zamanlamayı erteleyebilir. Uygulamayı isteğe bağlı açarsan son güncellemeyi ve yerel kayıt sayısını görürsün.
 
-## v0.5 Xiaomi Dialer path traced from APK
-The supplied `com.android.contacts` APK contains the route `TwelveKeyDialerFragment.E7` -> `DialerListDataSource.Q0` (T9 query). Separately, `YellowPagePhoneLoader.J` calls `YellowPageProxy.z`/`.t`, which call `YellowPageUtils.getPhoneInfo` and `getAntispamNumberCategory`. This version installs **diagnostic-only** hooks on these actual entry points, plus `YellowPageUtils.queryPhoneInfo`, to disambiguate dialer typing from YellowPage lookups. Check the logs for `entry=dialerFilter`, `entry=t9Query`, `entry=detailLookup`, `entry=phoneInfo`, `entry=spamCategory`, `entry=queryPhoneInfo`; match booleans only, no phone numbers. Hooking an entry point does not mean it is executed or that the caller will display a warning. No call blocking added.
+## Kaynak ve veri
 
-## v0.6 visual dialer proof of concept
-A successful v0.5 test showed `entry=t9Query inputMatch=true` in the supplied Xiaomi `com.android.contacts` process. v0.6 uses this exact path to display a rate-limited Android toast saying `Olası spam (TR)` when a dialer T9 query matches the local offline number list. It does **not** modify Xiaomi's real caller-ID/spam classification, incoming call window, provider data, or call blocking. No phone numbers are logged or sent over network. Look for `dialerNotice shown=true` when the toast is drawn, or `dialerNotice error=<type>` if it fails. One notice per 10 seconds maximum. If the toast cannot be displayed, the rest of the module continues as before.
+- **Türkiye spam listesi:** `symbuzzer/Turkish-Spam-Numbers` GPL-3.0 CSV (doğrudan, anahtarsız HTTPS)
+  - https://github.com/symbuzzer/Turkish-Spam-Numbers
+  - `https://raw.githubusercontent.com/symbuzzer/Turkish-Spam-Numbers/main/SpamBlocker.csv`
+- **İlk paket içi liste:** 201 Türkiye numarası. Geçerli bir yeni CSV doğrulanınca yerel liste değişir; güncelleme başarısız olursa son sağlam liste korunur. **Günlük kontrol**, kaynağın her gün yeni numara eklediği anlamına gelmez.
+- Liste yalnızca numaraya tam eşleşme yapar, herhangi bir numara aralığını spam olarak genellemez. Yanlış pozitif olasılığı vardır.
+- **OpenSpam tam listesi bu sürümde YOKTUR.** OpenSpam toplu dışa aktarımı ayrıca yetkilendirilmiştir. Standart bireysel API sorguları ve API anahtarı ekranı v1.3'ten kaldırılmıştır.
+- Bu açık küçük Türkiye veri kaynağı **Google Telefon'un milyonlarca kullanıcı raporlu spam veritabanının eşdeğeri değildir**. Ek, lisanslı ve Türkiye'yi kapsayan veri kaynakları bulunursa aynı yerel güncelleyiciye bağlanabilir.
 
-## v0.7 InCallUI native label experiment
-The user-supplied `com.android.incallui` APK was inspected directly. It contains `CallerInfo`, `ContactInfoCache`, `model.YellowPageInfo`, `model.CallCardInfo` and `CallCardFragment`. The native path is `CallCardPresenter.updateSingleDisplayInfo()` -> `CallCardInfo.createCallCardInfo(Call, ContactCacheEntry)` -> `CallCardFragment.setSingleCallInfo(CallCardInfo, ...)`. The card has a `markTitle` String field used by native UI. v0.7 hooks `createCallCardInfo` in `com.android.incallui` and **only when the card is incoming, not an emergency and its number is in the offline list**, sets `markTitle` to `Olası spam (TR)` if no existing label is present. It does not change call state, call blocking, contact names, or avatars; existing labels are preserved. This is an UNVERIFIED on-device incoming-call display experiment. `incomingCardHooks=1` verifies installation, `incomingCard nativeLabelSet=true` confirms the in-memory field change only; a real incoming call and screen observation are still needed to verify the native label displays. No phone numbers are logged.
+## Teknik
 
-## v0.8: three-minute opt-in incoming call label preview
-The v0.7 real incoming-call logs confirmed `incomingCard created=true incoming=true emergency=false matched=false`; the native call card hook runs but the trusted test caller is not in the offline spam list. To verify native on-screen label rendering without claiming that a trusted contact is spam, v0.8 adds an **opt-in, temporary preview** using Android's `Settings.Global` key `yellowpagetr_preview_until` (Unix milliseconds). InCallUI will set `markTitle` to `YellowPage TR (TEST)` only for an incoming, non-emergency, not-listed number when the timestamp is still in the future and at most 180000 ms away. Expiration is automatic, and existing Xiaomi labels are always preserved. The real-list match path still writes `Olası spam (TR)`. To arm for 2 minutes in Windows PowerShell, run: `$deadline=[DateTimeOffset]::UtcNow.AddMinutes(2).ToUnixTimeMilliseconds(); & 'C:\platform-tools\adb.exe' shell settings put global yellowpagetr_preview_until $deadline` then have a trusted caller call you. To disable immediately: `adb shell settings delete global yellowpagetr_preview_until`. Logs `incomingCard nativePreviewLabelSet=true` show only the field update; visible label needs an on-device check. This preview does NOT mark normal callers as spam.
+- `BootSyncReceiver` Android'in `BOOT_COMPLETED` veya `MY_PACKAGE_REPLACED` olayında senkronizasyonu planlar. `DailySpamSyncJob` `JobScheduler` ile ağ erişimi olan uygun bir zamanda listeyi alır.
+- `DailyOfflineList` CSV başlığını, kayıt biçimini, minimum/maksimum sayıyı ve en çok 1 MB dosya boyutunu doğrular, veriyi özel uygulama depolamasına atomik olarak kaydeder. Uygulama var olan listeyi kullanır; gelen çağrıda HTTPS yapılmaz.
+- `RiskCacheProvider.call("hasLocalRisk")` yalnızca Xiaomi Telefon, InCallUI ve YellowPage'in kimliği doğrulanmış UID'lerine `boolean` yanıt verir. Telefon numaraları veya arama günlükleri saklanmaz, günlüklerde numara yazılmaz.
+- `HookEntry` Xamarin değil **Xiaomi'nin gerçek InCallUI** `CallCardInfo.createCallCardInfo` yolundaki `markTitle` ve `extraInfo` alanlarını doldurur. Orijinal kişi adı ve daha önceki Xiaomi etiketi korunur, arama engelleme yapılmaz.
+- v0.9'da `YellowPage TR (TEST)` etiketi gerçek gelen arama ekranında **görsel olarak doğrulandı**. v1.3'ün yenilenen listeyi gerçek spam gelen aramada gösterme davranışı telefonda ayrıca doğrulanmalıdır.
+- Kayıtlar: `YellowPageTR/1.3`. Kapsam doğru olsa bile her romda aynı Xiaomi metotları bulunmayabilir.
 
-## v0.9 incoming call native TextView fix
-v0.8 device logs confirmed `incomingCard nativePreviewLabelSet=true` for real incoming calls, but the user saw only the saved contact name. Inspecting the provided InCallUI APK showed that `CallCardFragment.setYellowPageInfo()` sends **CallCardInfo.extraInfo** to `CallCardOptionalInfoView.showExtraInfo()`; this writes `mCallCardExtraTitle` and controls optional-info view visibility. `markTitle` alone does not provide this route. v0.9 sets both `markTitle` and `extraInfo` for a matched, incoming, non-emergency call, or for the short-lived opt-in preview `YellowPage TR (TEST)`. Existing Xiaomi `markTitle` or `extraInfo` values are preserved. A diagnostic hook checks `extraInfo renderedMethod=true textMatches=true` after `showExtraInfo`. Neither this log nor build success proves the label is visually displayed, which requires an on-device check. To enable the preview for two minutes in PowerShell: `$until=[DateTimeOffset]::UtcNow.AddMinutes(2).ToUnixTimeMilliseconds(); & 'C:\platform-tools\adb.exe' shell settings put global yellowpagetr_preview_until $until`; then receive a call from a trusted number. Disable: `adb shell settings delete global yellowpagetr_preview_until`. No new call-blocking behavior, phone number logging or network permission.
+## Lisans / güvenlik
 
-## v1.0 — recommended LSPosed scope and opt-in OpenSpam
-- Legacy API `AndroidManifest.xml` declares `xposedscope=@array/yellowpage_recommended_scope` with `com.android.contacts`, `com.android.incallui`, `com.miui.yellowpage`. `assets/xposed_scope` is retained as a fallback hint. On fresh enable, compatible LSPosed Managers automatically select the recommended apps; existing custom scopes may need the user to apply recommendations. No broad system scope.
-- OpenSpam REST API requires a **user-provided API key** (`X-API-Key`) and only allows free noncommercial access subject to limits. The app offers an explicit manual lookup button, opt-in checkbox, and link to the API panel. User-provided keys are kept only in memory for this session; none are bundled, stored, or logged. **Only explicit manual lookups send a number and API key to OpenSpam**; incoming calls never initiate HTTP requests.
-- Manual lookup results are cached privately for 24 hours under a SHA-256 of normalized phone. If there are at least 3 reports, a lookup from the native InCallUI can display `Olası spam (OpenSpam)` in the existing extraInfo field if no Xiaomi label exists, while the original 201-number offline list continues to show `Olası spam (TR)`.
-- Cross-process cache is exposed only as a yes/no Binder `ContentProvider.call` result to UIDs belonging to Xiaomi InCallUI and Contacts; no raw phone numbers or keys are written into the cache. If the provider is not available, the original call display is unchanged. The OpenSpam cache display path has **not yet been tested on device**; it is an experimental addition to the already-tested native label. Offline original list remains available without network.
-- OpenSpam API: https://api.openspam.es/doc/ . Official rate limits should be checked before use. Suggested test: confirm recommended scope in LSPosed, check offline test, use a manually entered phone with an OpenSpam API key (if available), verify cache result, then test native incoming-call label as appropriate. Do not upload API keys or private incoming phone numbers to GitHub logs.
-
-## v1.2 — daily offline Turkish list and the OpenSpam export limitation
-
-- Native Xiaomi YellowPage / InCallUI is **not replaced**. LSPosed keeps scope in `com.android.contacts`, `com.android.incallui`, and `com.miui.yellowpage`; native incoming call extraInfo was visually confirmed with v0.9.
-- An Android `JobScheduler` job updates the GPL-3.0 `symbuzzer/Turkish-Spam-Numbers` CSV roughly once per day while network is available. At initial app launch the first refresh is scheduled; the app also has a manual update button and last-update status. A failed refresh preserves the previous verified snapshot. Incoming calls only ask the module's local Binder provider whether a number appears in the on-device list; the native call handler **never performs network I/O**.
-- Source attribution: https://github.com/symbuzzer/Turkish-Spam-Numbers, GPL-3.0. This 201-number fallback and the public daily refreshed CSV are **not OpenSpam data**.
-- OpenSpam's latest 2026-11-03 documentation explicitly restricts `/api/export`, `/api/numbers` and `/api/lista-completa` to authenticated official apps, while enterprise list access requires a separately granted route and a contract. A standard personal API key **cannot legally or technically dump the complete OpenSpam database**. The terms prohibit range crawling or creating a substitute database. We will not scrape or bypass those restrictions.
-- OpenSpam individual lookups continue only when the user explicitly opts in and presses the manual lookup button, as an optional tool. The previously prototyped v1.1 automatic per-caller OpenSpam network hooks are **disabled** in v1.2. `OpenSpamSettings.setEnabled(false)` runs on MainActivity launch; regardless of prior settings there is no call-time network path in HookEntry.
-- If authorized list access and on-device caching rights are granted by OpenSpam, we can replace/augment the daily list with their supplied enterprise endpoint, pagination, API key handling, source attribution, update/removal handling, and licence-compliant TTL. No OpenSpam full feed was downloaded or integrated in v1.2.
+GPL-3.0 upstream listesinin lisansı: `LICENSES/`. Yalnızca kullanıcıya şüpheli spam etiketi gösterir, çağrıları otomatik reddetmez. Acil aramalar için kullanılmamalıdır.
