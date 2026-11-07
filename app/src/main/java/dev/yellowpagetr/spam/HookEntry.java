@@ -5,6 +5,8 @@ import android.os.Bundle;
 import android.database.Cursor;
 import android.content.Context;
 import android.os.Handler;
+import android.os.ResultReceiver;
+import java.lang.ref.WeakReference;
 import android.os.Looper;
 import android.widget.Toast;
 import de.robv.android.xposed.IXposedHookLoadPackage;
@@ -14,12 +16,14 @@ import de.robv.android.xposed.XposedHelpers;
 import de.robv.android.xposed.callbacks.XC_LoadPackage;
 /** Experimentally alter existing Xiaomi number-result objects only. */
 public final class HookEntry implements IXposedHookLoadPackage {
-    private static final String LOG="YellowPageTR/1.0";
+    private static final String LOG="YellowPageTR/1.1";
     private static final java.util.concurrent.atomic.AtomicInteger TRACE_COUNT = new java.util.concurrent.atomic.AtomicInteger();
     private static final java.util.concurrent.atomic.AtomicInteger PROVIDER_TRACE_COUNT = new java.util.concurrent.atomic.AtomicInteger();
     private static final java.util.concurrent.atomic.AtomicInteger RESOLVER_TRACE_COUNT = new java.util.concurrent.atomic.AtomicInteger();
     private static final java.util.concurrent.atomic.AtomicInteger ENTRY_TRACE_COUNT = new java.util.concurrent.atomic.AtomicInteger();
     private static final java.util.concurrent.atomic.AtomicLong LAST_NOTICE_AT = new java.util.concurrent.atomic.AtomicLong(0L);
+    private static WeakReference<Object> CURRENT_CALL_FRAGMENT = new WeakReference<>(null);
+    private static WeakReference<Object> CURRENT_CALL_CARD = new WeakReference<>(null);
     @Override public void handleLoadPackage(XC_LoadPackage.LoadPackageParam param) {
         String pkg=param.packageName;
         if (!"com.miui.yellowpage".equals(pkg) && !"com.android.contacts".equals(pkg)
@@ -32,7 +36,10 @@ public final class HookEntry implements IXposedHookLoadPackage {
         if ("com.android.incallui".equals(pkg)) {
             total+=installIncomingCallCard(param.classLoader);
             total+=installExtraInfoRenderProbe(param.classLoader);
+            total+=installIncomingLiveRefresh(param.classLoader);
         }
+        // This is the *existing Xiaomi YellowPage* lookup path, not a replacement dialer.
+        total+=installNativeYellowPageLookup(param.classLoader);
         // Entry points verified in the supplied Xiaomi Contacts APK.
         if ("com.android.contacts".equals(pkg)) {
             total+=observe(param.classLoader,
@@ -46,6 +53,131 @@ public final class HookEntry implements IXposedHookLoadPackage {
         total+=observe(param.classLoader,"miui.yellowpage.YellowPageUtils","getAntispamNumberCategory","spamCategory");
         total+=observe(param.classLoader,"miui.yellowpage.YellowPageUtils","queryPhoneInfo","queryPhoneInfo");
         XposedBridge.log(LOG+": process="+pkg+" hooks="+total+" offlineEntries="+SpamDb.size());
+    }
+
+    /**
+     * Observe Xiaomi's actual YellowPageUtils API. The returned YellowPage
+     * object is untouched; extra OpenSpam data is resolved by an opt-in
+     * local cache and displayed in Xiaomi's native in-call extra-info slot.
+     * No network I/O or blocking happens in the Xiaomi process.
+     */
+    private static int installNativeYellowPageLookup(ClassLoader loader) {
+        try {
+            Class<?> type=XposedHelpers.findClassIfExists("miui.yellowpage.YellowPageUtils",loader);
+            if(type==null) return 0;
+            XC_MethodHook observer=new XC_MethodHook() {
+                private final java.util.concurrent.atomic.AtomicInteger count=
+                    new java.util.concurrent.atomic.AtomicInteger();
+                @Override protected void beforeHookedMethod(MethodHookParam p) {
+                    try {
+                        if(p.args==null || p.args.length<2 ||
+                            !(p.args[0] instanceof Context) ||
+                            !(p.args[1] instanceof String)) return;
+                        String phone=(String)p.args[1];
+                        if(SpamDb.normalize(phone)==null || SpamDb.contains(phone))return;
+                        Bundle response=requestOpenSpamNative((Context)p.args[0],phone,null);
+                        if(count.incrementAndGet()<=45)
+                            XposedBridge.log(LOG+": nativeYellowPage lookedUp=true cached="+
+                                (response!=null && response.getBoolean("fresh",false)));
+                    } catch(Throwable ignored) {}
+                }
+            };
+            int hooked=XposedBridge.hookAllMethods(type,"getPhoneInfo",observer).size();
+            hooked+=XposedBridge.hookAllMethods(type,"getAntispamNumberCategory",observer).size();
+            XposedBridge.log(LOG+": nativeYellowPageHooks="+hooked);
+            return hooked;
+        } catch(Throwable e) {
+            XposedBridge.log(LOG+": nativeYellowPageHookError="+e.getClass().getSimpleName());
+            return 0;
+        }
+    }
+    /**
+     * App-local provider owns the optional API key and network worker.
+     * The native Xiaomi package sees only an immediate boolean cache result.
+     */
+    private static Bundle requestOpenSpamNative(Context context,String phone,
+                                                ResultReceiver receiver) {
+        if(SpamDb.normalize(phone)==null)return null;
+        try {
+            Bundle extras=new Bundle();
+            extras.putString("phone",phone);
+            if(receiver!=null) extras.putParcelable("callback",receiver);
+            return context.getContentResolver().call(
+                Uri.parse("content://dev.yellowpagetr.spam.cache/risk"),
+                "checkAndFetch",null,extras);
+        } catch(Throwable ignored) {return null;}
+    }
+    /**
+     * A late OpenSpam response refreshes Xiaomi's own native call-card
+     * optional-info view, without replacing contact name, call state,
+     * blocking controls, or the dialer.
+     */
+    private static int installIncomingLiveRefresh(ClassLoader loader) {
+        try {
+            Class<?> type=XposedHelpers.findClassIfExists(
+                "com.android.incallui.CallCardFragment",loader);
+            if(type==null) {
+                XposedBridge.log(LOG+": nativeRefreshClassMissing");
+                return 0;
+            }
+            int count=XposedBridge.hookAllMethods(type,"setSingleCallInfo",new XC_MethodHook() {
+                @Override protected void afterHookedMethod(MethodHookParam p) {
+                    try {
+                        if(p.args==null || p.args.length==0 || p.args[0]==null)return;
+                        final Object fragment=p.thisObject;
+                        final Object card=p.args[0];
+                        CURRENT_CALL_FRAGMENT=new WeakReference<>(fragment);
+                        CURRENT_CALL_CARD=new WeakReference<>(card);
+                        if(!readBool(card,"isIncoming") || readBool(card,"isEmergencyNumber"))return;
+                        String oldMark=readString(card,"markTitle");
+                        String oldExtra=readString(card,"extraInfo");
+                        if((oldMark!=null && !oldMark.trim().isEmpty()) ||
+                           (oldExtra!=null && !oldExtra.trim().isEmpty()))return;
+                        String candidate=readString(card,"phoneNumber");
+                        if(SpamDb.normalize(candidate)==null || SpamDb.contains(candidate))return;
+                        Context ctx=(Context)XposedHelpers.callMethod(fragment,"getContext");
+                        if(ctx==null)return;
+                        final String phone=candidate;
+                        ResultReceiver callback=new ResultReceiver(new Handler(Looper.getMainLooper())) {
+                            @Override protected void onReceiveResult(int code,Bundle data) {
+                                if(data==null || !data.getBoolean("risk",false))return;
+                                try {
+                                    if(CURRENT_CALL_FRAGMENT.get()!=fragment ||
+                                       CURRENT_CALL_CARD.get()!=card)return;
+                                    if(!readBool(card,"isIncoming") ||
+                                       readBool(card,"isEmergencyNumber"))return;
+                                    String current=readString(card,"extraInfo");
+                                    if(current!=null && !current.trim().isEmpty())return;
+                                    String mark=readString(card,"markTitle");
+                                    if(mark!=null && !mark.trim().isEmpty())return;
+                                    writeStringField(card,"markTitle","Olası spam (OpenSpam)");
+                                    writeStringField(card,"extraInfo","Olası spam (OpenSpam)");
+                                    XposedHelpers.callMethod(fragment,"setYellowPageInfo",card);
+                                    XposedBridge.log(LOG+": nativeYellowPage liveLabelUpdated=true");
+                                } catch(Throwable e) {
+                                    XposedBridge.log(LOG+": nativeYellowPage refreshError="+
+                                        e.getClass().getSimpleName());
+                                }
+                            }
+                        };
+                        Bundle initial=requestOpenSpamNative(ctx,phone,callback);
+                        if(initial!=null && initial.getBoolean("risk",false)) {
+                            Bundle result=new Bundle();
+                            result.putBoolean("risk",true);
+                            callback.send(0,result);
+                        }
+                    } catch(Throwable e) {
+                        XposedBridge.log(LOG+": nativeYellowPage refreshSetupError="+
+                            e.getClass().getSimpleName());
+                    }
+                }
+            }).size();
+            XposedBridge.log(LOG+": nativeRefreshHooks="+count);
+            return count;
+        } catch(Throwable e) {
+            XposedBridge.log(LOG+": nativeRefreshHookError="+e.getClass().getSimpleName());
+            return 0;
+        }
     }
 
     /**
