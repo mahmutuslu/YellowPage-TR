@@ -14,7 +14,7 @@ import de.robv.android.xposed.XposedHelpers;
 import de.robv.android.xposed.callbacks.XC_LoadPackage;
 /** Experimentally alter existing Xiaomi number-result objects only. */
 public final class HookEntry implements IXposedHookLoadPackage {
-    private static final String LOG="YellowPageTR/0.7";
+    private static final String LOG="YellowPageTR/0.8";
     private static final java.util.concurrent.atomic.AtomicInteger TRACE_COUNT = new java.util.concurrent.atomic.AtomicInteger();
     private static final java.util.concurrent.atomic.AtomicInteger PROVIDER_TRACE_COUNT = new java.util.concurrent.atomic.AtomicInteger();
     private static final java.util.concurrent.atomic.AtomicInteger RESOLVER_TRACE_COUNT = new java.util.concurrent.atomic.AtomicInteger();
@@ -152,7 +152,8 @@ public final class HookEntry implements IXposedHookLoadPackage {
                         if(traces.incrementAndGet()<=80)
                             XposedBridge.log(LOG+": incomingCard created=true incoming="+incoming+
                                 " emergency="+emergency+" matched="+matched);
-                        if(!incoming || emergency || !matched) return;
+                        if(!incoming || emergency) return;
+                        // Do not override an existing Xiaomi classification.
                         java.lang.reflect.Field title=card.getClass().getDeclaredField("markTitle");
                         title.setAccessible(true);
                         Object existing=title.get(card);
@@ -160,8 +161,15 @@ public final class HookEntry implements IXposedHookLoadPackage {
                             XposedBridge.log(LOG+": incomingCard existingLabelPreserved=true");
                             return;
                         }
-                        title.set(card,"Olası spam (TR)");
-                        XposedBridge.log(LOG+": incomingCard nativeLabelSet=true");
+                        if(matched) {
+                            title.set(card,"Olası spam (TR)");
+                            XposedBridge.log(LOG+": incomingCard nativeLabelSet=true");
+                        } else if(isPreviewWindowOpen()) {
+                            // Never call a normal number "spam". This is a transparent
+                            // preview of the native UI label slot, not classification.
+                            title.set(card,"YellowPage TR (TEST)");
+                            XposedBridge.log(LOG+": incomingCard nativePreviewLabelSet=true");
+                        }
                     } catch(Throwable error) {
                         XposedBridge.log(LOG+": incomingCard error="+error.getClass().getSimpleName());
                     }
@@ -174,6 +182,32 @@ public final class HookEntry implements IXposedHookLoadPackage {
             return 0;
         }
     }
+    /**
+     * Opt-in, automatically expiring native-label preview.
+     * Only adb shell can write Settings.Global on normal devices.
+     * Reject windows longer than 3 minutes to guard stale debug settings.
+     */
+    private static boolean isPreviewWindowOpen() {
+        try {
+            Class<?> thread=Class.forName("android.app.ActivityThread");
+            Method current=thread.getDeclaredMethod("currentApplication");
+            current.setAccessible(true);
+            Object application=current.invoke(null);
+            if(!(application instanceof Context)) {
+                XposedBridge.log(LOG+": incomingCard previewContextMissing");
+                return false;
+            }
+            long deadline=android.provider.Settings.Global.getLong(
+                ((Context)application).getContentResolver(),
+                "yellowpagetr_preview_until",0L);
+            long remaining=deadline-System.currentTimeMillis();
+            return remaining>0 && remaining<=180000L;
+        } catch(Throwable e) {
+            XposedBridge.log(LOG+": incomingCard previewCheckError="+e.getClass().getSimpleName());
+            return false;
+        }
+    }
+
     private static boolean readBool(Object target,String field) throws Exception {
         java.lang.reflect.Field f=target.getClass().getDeclaredField(field);
         f.setAccessible(true);
