@@ -31,3 +31,17 @@ assert 'OpenSpamCache.hasRisk' in provider
 assert 'hasCachedOpenSpamRisk' in hook
 assert 'Olası spam (OpenSpam)' in hook
 print('PASS: recommended LSPosed scope and explicit OpenSpam privacy boundary')
+
+# v1.2: daily GPL source is linked into the native Xiaomi process by local IPC.
+daily=(r/'app/src/main/java/dev/yellowpagetr/spam/DailyOfflineList.java').read_text()
+job=(r/'app/src/main/java/dev/yellowpagetr/spam/DailySpamSyncJob.java').read_text()
+assert 'raw.githubusercontent.com/symbuzzer/Turkish-Spam-Numbers' in daily
+assert 'MAX_BYTES=1024*1024' in daily
+assert 'JobService' in job and '.setPeriodic(PERIOD,' in job
+assert 'android.permission.BIND_JOB_SERVICE' in manifest
+assert 'hasLocalRisk' in provider and 'DailyOfflineList.contains' in provider
+assert 'hasOfflineSpam(' in hook and 'YellowPageTR/1.2' in hook
+assert 'total+=installIncomingLiveRefresh(' not in hook
+assert 'total+=installNativeYellowPageLookup(' not in hook
+assert 'DailySpamSyncJob.schedule(this)' in main
+print('PASS: daily Turkish GPL offline list and no automatic OpenSpam phone-number upload')
