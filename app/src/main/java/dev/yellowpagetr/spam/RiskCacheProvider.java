@@ -35,6 +35,11 @@ public final class RiskCacheProvider extends ContentProvider {
         if(!authorized()) throw new SecurityException("Not a permitted Xiaomi caller");
         Bundle out=new Bundle();
         if(extras==null) return out;
+        if("hasLocalRisk".equals(method)) {
+            out.putBoolean("available",true);
+            out.putBoolean("risk",DailyOfflineList.contains(getContext(),extras.getString("phone")));
+            return out;
+        }
         if(!"hasRisk".equals(method) && !"checkAndFetch".equals(method)) return out;
         String phone=extras.getString("phone");
         out.putBoolean("risk",OpenSpamCache.hasRisk(getContext(),phone));
