@@ -82,3 +82,40 @@ jobs:
           if git diff --cached --quiet; then exit 0; fi
           git commit -m "ci: record build result [skip ci]"
           git push origin HEAD:main
+
+  release:
+    name: Publish v1.3.0 release
+    needs: [build]
+    if: ${{ github.ref == 'refs/heads/main' && needs.build.result == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download validated APK
+        uses: actions/download-artifact@v4
+        with:
+          name: YellowPage-TR-LSPosed-v1.3-debug-APK
+          path: release-apk
+      - name: Publish tagged release with checksum
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TARGET: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          test -s release-apk/app-debug.apk
+          cp release-apk/app-debug.apk release-apk/YellowPage_TR_v1.3.apk
+          cd release-apk
+          sha256sum YellowPage_TR_v1.3.apk > SHA256SUMS.txt
+          cd ..
+          if gh release view v1.3.0 >/dev/null 2>&1; then
+            echo 'v1.3.0 release already exists; leaving it unchanged'
+            exit 0
+          fi
+          gh release create v1.3.0 \
+            release-apk/YellowPage_TR_v1.3.apk \
+            release-apk/SHA256SUMS.txt \
+            --title 'YellowPage TR v1.3.0' \
+            --notes-file RELEASE_NOTES_v1.3.0.md \
+            --target "$RELEASE_TARGET"
