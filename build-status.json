@@ -1,6 +1,6 @@
 {
-  "build_result": "success",
-  "run_id": 42380789196,
-  "run_url": "https://github.com/mahmutuslu/YellowPage-TR/actions/runs/42380789196",
-  "source_sha": "e47c9aa3576395edd53a432ea76d79b009e00ea7"
+  "build_result": "failure",
+  "run_id": 42389373874,
+  "run_url": "https://github.com/mahmutuslu/YellowPage-TR/actions/runs/42389373874",
+  "source_sha": "a56ae64c9ff395414b7264fbbd005b84a20dea4f"
 }
