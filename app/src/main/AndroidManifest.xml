@@ -4,6 +4,8 @@
         <meta-data android:name="xposedmodule" android:value="true" />
         <meta-data android:name="xposeddescription" android:value="@string/app_description" />
         <meta-data android:name="xposedminversion" android:value="82" />
+        <!-- LSPosed legacy API: preselect only the three Xiaomi packages used by this module. -->
+        <meta-data android:name="xposedscope" android:resource="@array/yellowpage_recommended_scope" />
         <activity android:name=".MainActivity" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
