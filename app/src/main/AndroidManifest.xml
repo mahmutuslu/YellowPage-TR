@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- Used only after an explicit user-initiated OpenSpam lookup. -->
+    <!-- Used only by background downloads of the public licensed CSV. -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <!-- Allow UID validation of the Xiaomi packages querying the local cache. -->
@@ -16,6 +16,13 @@
         <!-- LSPosed legacy API: preselect only the three Xiaomi packages used by this module. -->
         <meta-data android:name="xposedscope" android:resource="@array/yellowpage_recommended_scope" />
         <!-- No network in this provider; Binder UID is validated on every call. -->
+        <receiver android:name=".BootSyncReceiver"
+            android:enabled="true" android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED"/>
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED"/>
+            </intent-filter>
+        </receiver>
         <service android:name=".DailySpamSyncJob"
             android:permission="android.permission.BIND_JOB_SERVICE"
             android:exported="true" />
