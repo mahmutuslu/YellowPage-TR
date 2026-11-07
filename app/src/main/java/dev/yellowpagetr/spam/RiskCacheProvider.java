@@ -8,23 +8,29 @@ import android.net.Uri;
 import android.os.Binder;
 import android.os.Bundle;
 import android.os.Process;
-import android.os.ResultReceiver;
 
 /**
- * Read-only local lookup IPC for Xiaomi's scoped caller UI.
- * No HTTP requests, API keys, call logs or raw-number storage.
- * The caller's UID must belong to Xiaomi InCallUI / Contacts or to us.
+ * Only same-device number membership. Native Xiaomi InCallUI and YellowPage
+ * never perform Internet requests or receive/submit user credentials.
+ * Incoming numbers are not stored or logged by this provider.
  */
 public final class RiskCacheProvider extends ContentProvider {
-    public static final Uri URI=Uri.parse("content://dev.yellowpagetr.spam.cache/risk");
-    @Override public boolean onCreate() { return true; }
-
+    private static final String AUTHORITY="dev.yellowpagetr.spam.cache";
+    @Override public boolean onCreate() {
+        // Job creation is not done synchronously on the in-call thread.
+        // This also initializes the sync without requiring the user to open the UI.
+        new Thread(()->{
+            try {DailySpamSyncJob.schedule(getContext());}
+            catch(Throwable ignored) {}
+        },"YellowPageTR-SyncSchedule").start();
+        return true;
+    }
     private boolean authorized() {
         int uid=Binder.getCallingUid();
         if(uid==Process.myUid()) return true;
         PackageManager pm=getContext().getPackageManager();
         String[] packages=pm.getPackagesForUid(uid);
-        if(packages==null) return false;
+        if(packages==null)return false;
         for(String pkg:packages)
             if("com.android.incallui".equals(pkg) ||
                "com.android.contacts".equals(pkg) ||
@@ -32,25 +38,11 @@ public final class RiskCacheProvider extends ContentProvider {
         return false;
     }
     @Override public Bundle call(String method,String arg,Bundle extras) {
-        if(!authorized()) throw new SecurityException("Not a permitted Xiaomi caller");
+        if(!authorized())throw new SecurityException("Caller not authorized");
         Bundle out=new Bundle();
-        if(extras==null) return out;
-        if("hasLocalRisk".equals(method)) {
-            out.putBoolean("available",true);
-            out.putBoolean("risk",DailyOfflineList.contains(getContext(),extras.getString("phone")));
-            return out;
-        }
-        if(!"hasRisk".equals(method) && !"checkAndFetch".equals(method)) return out;
-        String phone=extras.getString("phone");
-        out.putBoolean("risk",OpenSpamCache.hasRisk(getContext(),phone));
-        out.putBoolean("fresh",OpenSpamCache.hasFreshResult(getContext(),phone));
-        if("checkAndFetch".equals(method) && !out.getBoolean("fresh",false)) {
-            // This is asynchronous. Never wait for the API on an incoming call.
-            ResultReceiver callback=null;
-            try {callback=extras.getParcelable("callback");}
-            catch(Throwable ignored) {}
-            OpenSpamAutoLookup.schedule(getContext(),phone,callback);
-        }
+        if(!"hasLocalRisk".equals(method) || extras==null)return out;
+        out.putBoolean("available",true);
+        out.putBoolean("risk",DailyOfflineList.contains(getContext(),extras.getString("phone")));
         return out;
     }
     @Override public Cursor query(Uri uri,String[] projection,String selection,
