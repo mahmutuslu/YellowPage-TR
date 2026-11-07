@@ -1,5 +1,8 @@
 package dev.yellowpagetr.spam;
 import java.lang.reflect.Method;
+import android.net.Uri;
+import android.os.Bundle;
+import android.database.Cursor;
 import de.robv.android.xposed.IXposedHookLoadPackage;
 import de.robv.android.xposed.XC_MethodHook;
 import de.robv.android.xposed.XposedBridge;
@@ -7,7 +10,7 @@ import de.robv.android.xposed.XposedHelpers;
 import de.robv.android.xposed.callbacks.XC_LoadPackage;
 /** Experimentally alter existing Xiaomi number-result objects only. */
 public final class HookEntry implements IXposedHookLoadPackage {
-    private static final String LOG="YellowPageTR/0.3";
+    private static final String LOG="YellowPageTR/0.4";
     private static final java.util.concurrent.atomic.AtomicInteger TRACE_COUNT = new java.util.concurrent.atomic.AtomicInteger();
     private static final java.util.concurrent.atomic.AtomicInteger PROVIDER_TRACE_COUNT = new java.util.concurrent.atomic.AtomicInteger();
     private static final java.util.concurrent.atomic.AtomicInteger RESOLVER_TRACE_COUNT = new java.util.concurrent.atomic.AtomicInteger();
@@ -34,8 +37,12 @@ public final class HookEntry implements IXposedHookLoadPackage {
             }
             int count = XposedBridge.hookAllMethods(type,"query",new XC_MethodHook() {
                 @Override protected void beforeHookedMethod(MethodHookParam p) {
-                    if (PROVIDER_TRACE_COUNT.incrementAndGet() <= 100)
-                        XposedBridge.log(LOG+": providerQuery invoked=true");
+                    if (PROVIDER_TRACE_COUNT.incrementAndGet() <= 80)
+                        XposedBridge.log(LOG+": providerQuery invoked=true inputMatch="+inputMatches(p.args));
+                }
+                @Override protected void afterHookedMethod(MethodHookParam p) {
+                    if (PROVIDER_TRACE_COUNT.get() <= 80)
+                        XposedBridge.log(LOG+": providerResult "+cursorShape(p.getResult()));
                 }
             }).size();
             XposedBridge.log(LOG+": providerHooks="+count);
@@ -58,8 +65,8 @@ public final class HookEntry implements IXposedHookLoadPackage {
                         if (!(authority instanceof String)) return;
                         String name=((String)authority).toLowerCase(java.util.Locale.ROOT);
                         if (!name.contains("yellowpage") && !name.contains("antispam")) return;
-                        if (RESOLVER_TRACE_COUNT.incrementAndGet() <= 100)
-                            XposedBridge.log(LOG+": resolverQuery relevantAuthority=true");
+                        if (RESOLVER_TRACE_COUNT.incrementAndGet() <= 80)
+                            XposedBridge.log(LOG+": resolverQuery relevantAuthority=true inputMatch="+inputMatches(p.args));
                     } catch(Throwable ignored) {}
                 }
             }).size();
@@ -69,6 +76,61 @@ public final class HookEntry implements IXposedHookLoadPackage {
             XposedBridge.log(LOG+": resolverHookError="+e.getClass().getSimpleName());
             return 0;
         }
+    }
+
+    /** Match in-memory only; never record input values, phone numbers, or complete URIs. */
+    private static boolean inputMatches(Object[] args) {
+        if (args == null) return false;
+        try {
+            for (Object arg : args) {
+                if (arg instanceof String && SpamDb.contains((String)arg)) return true;
+                if (arg instanceof String[]) {
+                    for (String value : (String[])arg) if (SpamDb.contains(value)) return true;
+                }
+                if (arg instanceof Uri) {
+                    Uri uri=(Uri)arg;
+                    for (String value : uri.getPathSegments()) if (SpamDb.contains(value)) return true;
+                    if (uri.isHierarchical()) {
+                        try {
+                            for (String name : uri.getQueryParameterNames())
+                                if (SpamDb.contains(uri.getQueryParameter(name))) return true;
+                        } catch (Throwable ignored) { }
+                    }
+                }
+                if (arg instanceof Bundle) {
+                    Bundle b=(Bundle)arg;
+                    for (String key : b.keySet()) {
+                        Object value=b.get(key);
+                        if(value instanceof String && SpamDb.contains((String)value)) return true;
+                        if(value instanceof String[]) {
+                            for(String v:(String[])value) if(SpamDb.contains(v)) return true;
+                        }
+                    }
+                }
+            }
+        } catch(Throwable ignored) {}
+        return false;
+    }
+    /** Only structural cursor metadata, not rows, URI, selection, or numeric values. */
+    private static String cursorShape(Object result) {
+        if (!(result instanceof Cursor)) return "cursor=false";
+        try {
+            String[] cols=((Cursor)result).getColumnNames();
+            StringBuilder out=new StringBuilder("cursor=true fields=");
+            if(cols==null) return out.append("none").toString();
+            out.append("[");
+            for(int i=0;i<cols.length && i<20;i++) {
+                if(i>0) out.append(",");
+                String name=cols[i];
+                // A field name could be dynamically generated. Reject anything
+                // that looks like user data, including long numeric fragments.
+                if(name==null || !name.matches("[A-Za-z_][A-Za-z0-9_]{0,39}")
+                    || name.matches(".*[0-9]{3,}.*")) name="?";
+                out.append(name);
+            }
+            if(cols.length>20) out.append(",...");
+            return out.append("]").toString();
+        } catch(Throwable e) { return "cursor=true fields=unavailable"; }
     }
     private static int install(ClassLoader loader,String name,boolean queryResult) {
         try {
