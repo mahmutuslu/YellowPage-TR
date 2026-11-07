@@ -103,7 +103,7 @@ public final class DailyOfflineList {
             }
             if(normalized.size()<50 || normalized.size()>50000)return false;
             StringBuilder text=new StringBuilder();
-            for(String item:normalized)text.append(item).append('\\n');
+            for(String item:normalized)text.append(item).append('\n');
             boolean ok=prefs(c).edit().putString(DATA,text.toString())
                 .putLong(TIME,System.currentTimeMillis()).commit();
             if(ok) {
