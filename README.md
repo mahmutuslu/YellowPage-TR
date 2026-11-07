@@ -1,4 +1,4 @@
-# YellowPage TR v0.6 — Experimental LSPosed module
+# YellowPage TR v0.7 — Experimental LSPosed module
 This project is a test harness for Xiaomi YellowPage on Xiaomi HyperOS. No Android Studio required.
 ## Scope
 - 201 community-reported Turkish phone numbers stored on-device (GPL-3.0 upstream).
@@ -6,10 +6,10 @@ This project is a test harness for Xiaomi YellowPage on Xiaomi HyperOS. No Andro
 - Does not patch the original priv-app APK, block calls, access Google Dialer data, make network requests, or request phone/contacts permissions.
 - **The Xiaomi in-call overlay is NOT verified.** The correct class loader and runtime method path may differ across ROMs.
 ## Build
-GitHub Actions > Build YellowPage TR LSPosed APK > run workflow; download Artifacts > YellowPage-TR-LSPosed-v0.6-debug-APK.
+GitHub Actions > Build YellowPage TR LSPosed APK > run workflow; download Artifacts > YellowPage-TR-LSPosed-v0.7-debug-APK.
 Android Studio is not needed.
 ## Device test
-Install debug APK, enable it in LSPosed, and scope only the listed Xiaomi packages that actually exist on your phone. Reboot or restart target processes. App UI tests the local CSV only. LSPosed logs: `YellowPageTR/0.6`; `hooks=0` means no matched class in this process.
+Install debug APK, enable it in LSPosed, and scope only the listed Xiaomi packages that actually exist on your phone. Reboot or restart target processes. App UI tests the local CSV only. LSPosed logs: `YellowPageTR/0.7`; `hooks=0` means no matched class in this process.
 Please test using a number you control. Unknown names in an open spam list may be inaccurate. Do not depend on this experiment for emergency or business calls.
 ## License
 Bundled community data is sourced from https://github.com/symbuzzer/Turkish-Spam-Numbers (GPL-3.0). See LICENSES/.
@@ -35,3 +35,6 @@ The supplied `com.android.contacts` APK contains the route `TwelveKeyDialerFragm
 
 ## v0.6 visual dialer proof of concept
 A successful v0.5 test showed `entry=t9Query inputMatch=true` in the supplied Xiaomi `com.android.contacts` process. v0.6 uses this exact path to display a rate-limited Android toast saying `Olası spam (TR)` when a dialer T9 query matches the local offline number list. It does **not** modify Xiaomi's real caller-ID/spam classification, incoming call window, provider data, or call blocking. No phone numbers are logged or sent over network. Look for `dialerNotice shown=true` when the toast is drawn, or `dialerNotice error=<type>` if it fails. One notice per 10 seconds maximum. If the toast cannot be displayed, the rest of the module continues as before.
+
+## v0.7 InCallUI native label experiment
+The user-supplied `com.android.incallui` APK was inspected directly. It contains `CallerInfo`, `ContactInfoCache`, `model.YellowPageInfo`, `model.CallCardInfo` and `CallCardFragment`. The native path is `CallCardPresenter.updateSingleDisplayInfo()` -> `CallCardInfo.createCallCardInfo(Call, ContactCacheEntry)` -> `CallCardFragment.setSingleCallInfo(CallCardInfo, ...)`. The card has a `markTitle` String field used by native UI. v0.7 hooks `createCallCardInfo` in `com.android.incallui` and **only when the card is incoming, not an emergency and its number is in the offline list**, sets `markTitle` to `Olası spam (TR)` if no existing label is present. It does not change call state, call blocking, contact names, or avatars; existing labels are preserved. This is an UNVERIFIED on-device incoming-call display experiment. `incomingCardHooks=1` verifies installation, `incomingCard nativeLabelSet=true` confirms the in-memory field change only; a real incoming call and screen observation are still needed to verify the native label displays. No phone numbers are logged.
