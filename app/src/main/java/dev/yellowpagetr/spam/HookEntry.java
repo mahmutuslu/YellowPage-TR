@@ -7,8 +7,10 @@ import de.robv.android.xposed.XposedHelpers;
 import de.robv.android.xposed.callbacks.XC_LoadPackage;
 /** Experimentally alter existing Xiaomi number-result objects only. */
 public final class HookEntry implements IXposedHookLoadPackage {
-    private static final String LOG="YellowPageTR/0.2";
+    private static final String LOG="YellowPageTR/0.3";
     private static final java.util.concurrent.atomic.AtomicInteger TRACE_COUNT = new java.util.concurrent.atomic.AtomicInteger();
+    private static final java.util.concurrent.atomic.AtomicInteger PROVIDER_TRACE_COUNT = new java.util.concurrent.atomic.AtomicInteger();
+    private static final java.util.concurrent.atomic.AtomicInteger RESOLVER_TRACE_COUNT = new java.util.concurrent.atomic.AtomicInteger();
     @Override public void handleLoadPackage(XC_LoadPackage.LoadPackageParam param) {
         String pkg=param.packageName;
         if (!"com.miui.yellowpage".equals(pkg) && !"com.android.contacts".equals(pkg)
@@ -16,7 +18,57 @@ public final class HookEntry implements IXposedHookLoadPackage {
         int total=0;
         total+=install(param.classLoader,"miui.yellowpage.YellowPagePhone",false);
         total+=install(param.classLoader,"com.miui.yellowpage.tool.QueryNumberResult",true);
+        if ("com.miui.yellowpage".equals(pkg)) total+=installProvider(param.classLoader);
+        total+=installResolver(param.classLoader);
         XposedBridge.log(LOG+": process="+pkg+" hooks="+total+" offlineEntries="+SpamDb.size());
+    }
+
+    /** Observe YellowPage's incoming ContentProvider requests; never print URIs or digits. */
+    private static int installProvider(ClassLoader loader) {
+        try {
+            Class<?> type = XposedHelpers.findClassIfExists(
+                "com.miui.yellowpage.providers.yellowpage.YellowPageProvider", loader);
+            if (type == null) {
+                XposedBridge.log(LOG+": providerClassMissing");
+                return 0;
+            }
+            int count = XposedBridge.hookAllMethods(type,"query",new XC_MethodHook() {
+                @Override protected void beforeHookedMethod(MethodHookParam p) {
+                    if (PROVIDER_TRACE_COUNT.incrementAndGet() <= 100)
+                        XposedBridge.log(LOG+": providerQuery invoked=true");
+                }
+            }).size();
+            XposedBridge.log(LOG+": providerHooks="+count);
+            return count;
+        } catch(Throwable e) {
+            XposedBridge.log(LOG+": providerHookError="+e.getClass().getSimpleName());
+            return 0;
+        }
+    }
+    /** Probe only yellowpage/antispam resolver authority; no URL, query or phone data logged. */
+    private static int installResolver(ClassLoader loader) {
+        try {
+            Class<?> type=XposedHelpers.findClassIfExists("android.content.ContentResolver",loader);
+            if(type == null) return 0;
+            int count=XposedBridge.hookAllMethods(type,"query",new XC_MethodHook() {
+                @Override protected void beforeHookedMethod(MethodHookParam p) {
+                    try {
+                        if (p.args == null || p.args.length == 0 || p.args[0] == null) return;
+                        Object authority=XposedHelpers.callMethod(p.args[0],"getAuthority");
+                        if (!(authority instanceof String)) return;
+                        String name=((String)authority).toLowerCase(java.util.Locale.ROOT);
+                        if (!name.contains("yellowpage") && !name.contains("antispam")) return;
+                        if (RESOLVER_TRACE_COUNT.incrementAndGet() <= 100)
+                            XposedBridge.log(LOG+": resolverQuery relevantAuthority=true");
+                    } catch(Throwable ignored) {}
+                }
+            }).size();
+            XposedBridge.log(LOG+": resolverHooks="+count);
+            return count;
+        } catch(Throwable e) {
+            XposedBridge.log(LOG+": resolverHookError="+e.getClass().getSimpleName());
+            return 0;
+        }
     }
     private static int install(ClassLoader loader,String name,boolean queryResult) {
         try {
