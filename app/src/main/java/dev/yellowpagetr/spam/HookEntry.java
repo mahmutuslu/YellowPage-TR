@@ -16,7 +16,7 @@ import de.robv.android.xposed.XposedHelpers;
 import de.robv.android.xposed.callbacks.XC_LoadPackage;
 /** Experimentally alter existing Xiaomi number-result objects only. */
 public final class HookEntry implements IXposedHookLoadPackage {
-    private static final String LOG="YellowPageTR/1.1";
+    private static final String LOG="YellowPageTR/1.2";
     private static final java.util.concurrent.atomic.AtomicInteger TRACE_COUNT = new java.util.concurrent.atomic.AtomicInteger();
     private static final java.util.concurrent.atomic.AtomicInteger PROVIDER_TRACE_COUNT = new java.util.concurrent.atomic.AtomicInteger();
     private static final java.util.concurrent.atomic.AtomicInteger RESOLVER_TRACE_COUNT = new java.util.concurrent.atomic.AtomicInteger();
@@ -36,11 +36,9 @@ public final class HookEntry implements IXposedHookLoadPackage {
         if ("com.android.incallui".equals(pkg)) {
             total+=installIncomingCallCard(param.classLoader);
             total+=installExtraInfoRenderProbe(param.classLoader);
-            total+=installIncomingLiveRefresh(param.classLoader);
         }
-        // This is the *existing Xiaomi YellowPage* lookup path, not a replacement dialer.
-        total+=installNativeYellowPageLookup(param.classLoader);
-        // Entry points verified in the supplied Xiaomi Contacts APK.
+        // Offline daily feed is provided to Xiaomi's existing number matching hooks.
+        // No OpenSpam HTTP queries are initiated during calls.        // Entry points verified in the supplied Xiaomi Contacts APK.
         if ("com.android.contacts".equals(pkg)) {
             total+=observe(param.classLoader,
                 "com.android.contacts.list.TwelveKeyDialerFragment","E7","dialerFilter");
@@ -53,6 +51,32 @@ public final class HookEntry implements IXposedHookLoadPackage {
         total+=observe(param.classLoader,"miui.yellowpage.YellowPageUtils","getAntispamNumberCategory","spamCategory");
         total+=observe(param.classLoader,"miui.yellowpage.YellowPageUtils","queryPhoneInfo","queryPhoneInfo");
         XposedBridge.log(LOG+": process="+pkg+" hooks="+total+" offlineEntries="+SpamDb.size());
+    }
+
+    /**
+     * Use the refreshed on-device Turkish list, served locally from the module
+     * app. No HTTPS, no OpenSpam and no telephone number appears in logs.
+     * If the provider is unavailable, keep the bundled 201-number fallback.
+     */
+    private static boolean hasOfflineSpam(String raw) {
+        String normalized=SpamDb.normalize(raw);
+        if(normalized==null)return false;
+        try {
+            Class<?> thread=Class.forName("android.app.ActivityThread");
+            Method current=thread.getDeclaredMethod("currentApplication");
+            current.setAccessible(true);
+            Object application=current.invoke(null);
+            if(application instanceof Context) {
+                Bundle extras=new Bundle();
+                extras.putString("phone",normalized);
+                Bundle response=((Context)application).getContentResolver().call(
+                    Uri.parse("content://dev.yellowpagetr.spam.cache/risk"),
+                    "hasLocalRisk",null,extras);
+                if(response!=null && response.getBoolean("available",false))
+                    return response.getBoolean("risk",false);
+            }
+        } catch(Throwable ignored) {}
+        return SpamDb.contains(normalized);
     }
 
     /**
@@ -74,7 +98,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                             !(p.args[0] instanceof Context) ||
                             !(p.args[1] instanceof String)) return;
                         String phone=(String)p.args[1];
-                        if(SpamDb.normalize(phone)==null || SpamDb.contains(phone))return;
+                        if(SpamDb.normalize(phone)==null || hasOfflineSpam(phone))return;
                         Bundle response=requestOpenSpamNative((Context)p.args[0],phone,null);
                         if(count.incrementAndGet()<=45)
                             XposedBridge.log(LOG+": nativeYellowPage lookedUp=true cached="+
@@ -134,7 +158,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                         if((oldMark!=null && !oldMark.trim().isEmpty()) ||
                            (oldExtra!=null && !oldExtra.trim().isEmpty()))return;
                         String candidate=readString(card,"phoneNumber");
-                        if(SpamDb.normalize(candidate)==null || SpamDb.contains(candidate))return;
+                        if(SpamDb.normalize(candidate)==null || hasOfflineSpam(candidate))return;
                         Context ctx=(Context)XposedHelpers.callMethod(fragment,"getContext");
                         if(ctx==null)return;
                         final String phone=candidate;
@@ -276,12 +300,12 @@ public final class HookEntry implements IXposedHookLoadPackage {
                         if(card==null || call==null) return;
                         boolean incoming=readBool(card,"isIncoming");
                         boolean emergency=readBool(card,"isEmergencyNumber");
-                        boolean matched=SpamDb.contains(readString(card,"phoneNumber"));
-                        if(!matched && cache!=null) matched=SpamDb.contains(readString(cache,"number"));
+                        boolean matched=hasOfflineSpam(readString(card,"phoneNumber"));
+                        if(!matched && cache!=null) matched=hasOfflineSpam(readString(cache,"number"));
                         if(!matched) {
                             try {
                                 Object num=XposedHelpers.callMethod(call,"getNumber");
-                                matched=num instanceof String && SpamDb.contains((String)num);
+                                matched=num instanceof String && hasOfflineSpam((String)num);
                             } catch(Throwable ignored) {}
                         }
                         if(traces.incrementAndGet()<=80)
@@ -502,17 +526,17 @@ public final class HookEntry implements IXposedHookLoadPackage {
         if (args == null) return false;
         try {
             for (Object arg : args) {
-                if (arg instanceof String && SpamDb.contains((String)arg)) return true;
+                if (arg instanceof String && hasOfflineSpam((String)arg)) return true;
                 if (arg instanceof String[]) {
-                    for (String value : (String[])arg) if (SpamDb.contains(value)) return true;
+                    for (String value : (String[])arg) if (hasOfflineSpam(value)) return true;
                 }
                 if (arg instanceof Uri) {
                     Uri uri=(Uri)arg;
-                    for (String value : uri.getPathSegments()) if (SpamDb.contains(value)) return true;
+                    for (String value : uri.getPathSegments()) if (hasOfflineSpam(value)) return true;
                     if (uri.isHierarchical()) {
                         try {
                             for (String name : uri.getQueryParameterNames())
-                                if (SpamDb.contains(uri.getQueryParameter(name))) return true;
+                                if (hasOfflineSpam(uri.getQueryParameter(name))) return true;
                         } catch (Throwable ignored) { }
                     }
                 }
@@ -520,9 +544,9 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     Bundle b=(Bundle)arg;
                     for (String key : b.keySet()) {
                         Object value=b.get(key);
-                        if(value instanceof String && SpamDb.contains((String)value)) return true;
+                        if(value instanceof String && hasOfflineSpam((String)value)) return true;
                         if(value instanceof String[]) {
-                            for(String v:(String[])value) if(SpamDb.contains(v)) return true;
+                            for(String v:(String[])value) if(hasOfflineSpam(v)) return true;
                         }
                     }
                 }
@@ -598,10 +622,10 @@ public final class HookEntry implements IXposedHookLoadPackage {
     private static boolean matches(Object phone) {
         if(phone==null) return false;
         try { Object n=XposedHelpers.callMethod(phone,"getNormalizedNumber");
-            if(n instanceof String && SpamDb.contains((String)n)) return true;
+            if(n instanceof String && hasOfflineSpam((String)n)) return true;
         } catch(Throwable ignored) {}
         try { Object n=XposedHelpers.callMethod(phone,"getNumber");
-            return n instanceof String && SpamDb.contains((String)n);
+            return n instanceof String && hasOfflineSpam((String)n);
         } catch(Throwable ignored) {}
         return false;
     }
