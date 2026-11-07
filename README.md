@@ -1,5 +1,9 @@
 # YellowPage TR v1.3 — API anahtarsız Xiaomi YellowPage spam uyarıları
 
+**Nihai paket:** [YellowPage TR v1.3.0 — GitHub Release](https://github.com/mahmutuslu/YellowPage-TR/releases/tag/v1.3.0) · [APK](https://github.com/mahmutuslu/YellowPage-TR/releases/download/v1.3.0/YellowPage_TR_v1.3.apk) · [SHA256](https://github.com/mahmutuslu/YellowPage-TR/releases/download/v1.3.0/SHA256SUMS.txt)
+
+**Durum:** Derleme, ilk liste güncellemesi ve Telefon/Kişiler LSPosed kancaları doğrulandı. Gerçek spam numarasından gelen aramada etiketin gösterilmesi henüz doğrulanmadı. Bu paket Android debug anahtarıyla imzalanmıştır.
+
 Xiaomi 15 Ultra / HyperOS 4 için deneysel **LSPosed** modülü. Xiaomi'nin orijinal Telefon, YellowPage ve gelen arama ekranları kullanılmaya devam eder. Modül bağımsız bir çevirici, Google Telefon veya çağrı engelleyici değildir.
 
 ## Kur ve unut
