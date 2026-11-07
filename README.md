@@ -1,4 +1,4 @@
-# YellowPage TR v1.0 — Experimental LSPosed module
+# YellowPage TR v1.2 — Experimental LSPosed module
 This project is a test harness for Xiaomi YellowPage on Xiaomi HyperOS. No Android Studio required.
 ## Scope
 - 201 community-reported Turkish phone numbers stored on-device (GPL-3.0 upstream).
@@ -6,10 +6,10 @@ This project is a test harness for Xiaomi YellowPage on Xiaomi HyperOS. No Andro
 - Does not patch any original system APK, block calls, or access Google Dialer data. Optional user-initiated OpenSpam HTTPS lookups require INTERNET permission; no phone/contacts runtime permissions are requested.
 - Xiaomi's native incoming-call extra-info label was visually verified on HyperOS 4 with the optional two-minute test preview. Automatic real caller number match remains experimental.
 ## Build
-GitHub Actions > Build YellowPage TR LSPosed APK > run workflow; download Artifacts > YellowPage-TR-LSPosed-v1.0-debug-APK.
+GitHub Actions > Build YellowPage TR LSPosed APK > run workflow; download Artifacts > YellowPage-TR-LSPosed-v1.2-debug-APK.
 Android Studio is not needed.
 ## Device test
-Install debug APK, enable it in LSPosed, and scope only the listed Xiaomi packages that actually exist on your phone. Reboot or restart target processes. App UI tests the local CSV only. LSPosed logs: `YellowPageTR/1.0`; `hooks=0` means no matched class in this process.
+Install debug APK, enable it in LSPosed, and scope only the listed Xiaomi packages that actually exist on your phone. Reboot or restart target processes. App UI tests the local CSV only. LSPosed logs: `YellowPageTR/1.2`; `hooks=0` means no matched class in this process.
 Please test using a number you control. Unknown names in an open spam list may be inaccurate. Do not depend on this experiment for emergency or business calls.
 ## License
 Bundled community data is sourced from https://github.com/symbuzzer/Turkish-Spam-Numbers (GPL-3.0). See LICENSES/.
@@ -51,3 +51,12 @@ v0.8 device logs confirmed `incomingCard nativePreviewLabelSet=true` for real in
 - Manual lookup results are cached privately for 24 hours under a SHA-256 of normalized phone. If there are at least 3 reports, a lookup from the native InCallUI can display `Olası spam (OpenSpam)` in the existing extraInfo field if no Xiaomi label exists, while the original 201-number offline list continues to show `Olası spam (TR)`.
 - Cross-process cache is exposed only as a yes/no Binder `ContentProvider.call` result to UIDs belonging to Xiaomi InCallUI and Contacts; no raw phone numbers or keys are written into the cache. If the provider is not available, the original call display is unchanged. The OpenSpam cache display path has **not yet been tested on device**; it is an experimental addition to the already-tested native label. Offline original list remains available without network.
 - OpenSpam API: https://api.openspam.es/doc/ . Official rate limits should be checked before use. Suggested test: confirm recommended scope in LSPosed, check offline test, use a manually entered phone with an OpenSpam API key (if available), verify cache result, then test native incoming-call label as appropriate. Do not upload API keys or private incoming phone numbers to GitHub logs.
+
+## v1.2 — daily offline Turkish list and the OpenSpam export limitation
+
+- Native Xiaomi YellowPage / InCallUI is **not replaced**. LSPosed keeps scope in `com.android.contacts`, `com.android.incallui`, and `com.miui.yellowpage`; native incoming call extraInfo was visually confirmed with v0.9.
+- An Android `JobScheduler` job updates the GPL-3.0 `symbuzzer/Turkish-Spam-Numbers` CSV roughly once per day while network is available. At initial app launch the first refresh is scheduled; the app also has a manual update button and last-update status. A failed refresh preserves the previous verified snapshot. Incoming calls only ask the module's local Binder provider whether a number appears in the on-device list; the native call handler **never performs network I/O**.
+- Source attribution: https://github.com/symbuzzer/Turkish-Spam-Numbers, GPL-3.0. This 201-number fallback and the public daily refreshed CSV are **not OpenSpam data**.
+- OpenSpam's latest 2026-11-03 documentation explicitly restricts `/api/export`, `/api/numbers` and `/api/lista-completa` to authenticated official apps, while enterprise list access requires a separately granted route and a contract. A standard personal API key **cannot legally or technically dump the complete OpenSpam database**. The terms prohibit range crawling or creating a substitute database. We will not scrape or bypass those restrictions.
+- OpenSpam individual lookups continue only when the user explicitly opts in and presses the manual lookup button, as an optional tool. The previously prototyped v1.1 automatic per-caller OpenSpam network hooks are **disabled** in v1.2. `OpenSpamSettings.setEnabled(false)` runs on MainActivity launch; regardless of prior settings there is no call-time network path in HookEntry.
+- If authorized list access and on-device caching rights are granted by OpenSpam, we can replace/augment the daily list with their supplied enterprise endpoint, pagination, API key handling, source attribution, update/removal handling, and licence-compliant TTL. No OpenSpam full feed was downloaded or integrated in v1.2.
