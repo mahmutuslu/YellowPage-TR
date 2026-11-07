@@ -1,4 +1,4 @@
-# YellowPage TR v0.8 — Experimental LSPosed module
+# YellowPage TR v0.9 — Experimental LSPosed module
 This project is a test harness for Xiaomi YellowPage on Xiaomi HyperOS. No Android Studio required.
 ## Scope
 - 201 community-reported Turkish phone numbers stored on-device (GPL-3.0 upstream).
@@ -6,10 +6,10 @@ This project is a test harness for Xiaomi YellowPage on Xiaomi HyperOS. No Andro
 - Does not patch the original priv-app APK, block calls, access Google Dialer data, make network requests, or request phone/contacts permissions.
 - **The Xiaomi in-call overlay is NOT verified.** The correct class loader and runtime method path may differ across ROMs.
 ## Build
-GitHub Actions > Build YellowPage TR LSPosed APK > run workflow; download Artifacts > YellowPage-TR-LSPosed-v0.8-debug-APK.
+GitHub Actions > Build YellowPage TR LSPosed APK > run workflow; download Artifacts > YellowPage-TR-LSPosed-v0.9-debug-APK.
 Android Studio is not needed.
 ## Device test
-Install debug APK, enable it in LSPosed, and scope only the listed Xiaomi packages that actually exist on your phone. Reboot or restart target processes. App UI tests the local CSV only. LSPosed logs: `YellowPageTR/0.8`; `hooks=0` means no matched class in this process.
+Install debug APK, enable it in LSPosed, and scope only the listed Xiaomi packages that actually exist on your phone. Reboot or restart target processes. App UI tests the local CSV only. LSPosed logs: `YellowPageTR/0.9`; `hooks=0` means no matched class in this process.
 Please test using a number you control. Unknown names in an open spam list may be inaccurate. Do not depend on this experiment for emergency or business calls.
 ## License
 Bundled community data is sourced from https://github.com/symbuzzer/Turkish-Spam-Numbers (GPL-3.0). See LICENSES/.
@@ -41,3 +41,6 @@ The user-supplied `com.android.incallui` APK was inspected directly. It contains
 
 ## v0.8: three-minute opt-in incoming call label preview
 The v0.7 real incoming-call logs confirmed `incomingCard created=true incoming=true emergency=false matched=false`; the native call card hook runs but the trusted test caller is not in the offline spam list. To verify native on-screen label rendering without claiming that a trusted contact is spam, v0.8 adds an **opt-in, temporary preview** using Android's `Settings.Global` key `yellowpagetr_preview_until` (Unix milliseconds). InCallUI will set `markTitle` to `YellowPage TR (TEST)` only for an incoming, non-emergency, not-listed number when the timestamp is still in the future and at most 180000 ms away. Expiration is automatic, and existing Xiaomi labels are always preserved. The real-list match path still writes `Olası spam (TR)`. To arm for 2 minutes in Windows PowerShell, run: `$deadline=[DateTimeOffset]::UtcNow.AddMinutes(2).ToUnixTimeMilliseconds(); & 'C:\platform-tools\adb.exe' shell settings put global yellowpagetr_preview_until $deadline` then have a trusted caller call you. To disable immediately: `adb shell settings delete global yellowpagetr_preview_until`. Logs `incomingCard nativePreviewLabelSet=true` show only the field update; visible label needs an on-device check. This preview does NOT mark normal callers as spam.
+
+## v0.9 incoming call native TextView fix
+v0.8 device logs confirmed `incomingCard nativePreviewLabelSet=true` for real incoming calls, but the user saw only the saved contact name. Inspecting the provided InCallUI APK showed that `CallCardFragment.setYellowPageInfo()` sends **CallCardInfo.extraInfo** to `CallCardOptionalInfoView.showExtraInfo()`; this writes `mCallCardExtraTitle` and controls optional-info view visibility. `markTitle` alone does not provide this route. v0.9 sets both `markTitle` and `extraInfo` for a matched, incoming, non-emergency call, or for the short-lived opt-in preview `YellowPage TR (TEST)`. Existing Xiaomi `markTitle` or `extraInfo` values are preserved. A diagnostic hook checks `extraInfo renderedMethod=true textMatches=true` after `showExtraInfo`. Neither this log nor build success proves the label is visually displayed, which requires an on-device check. To enable the preview for two minutes in PowerShell: `$until=[DateTimeOffset]::UtcNow.AddMinutes(2).ToUnixTimeMilliseconds(); & 'C:\platform-tools\adb.exe' shell settings put global yellowpagetr_preview_until $until`; then receive a call from a trusted number. Disable: `adb shell settings delete global yellowpagetr_preview_until`. No new call-blocking behavior, phone number logging or network permission.
