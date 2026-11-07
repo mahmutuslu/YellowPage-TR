@@ -1,15 +1,15 @@
-# YellowPage TR v0.9 — Experimental LSPosed module
+# YellowPage TR v1.0 — Experimental LSPosed module
 This project is a test harness for Xiaomi YellowPage on Xiaomi HyperOS. No Android Studio required.
 ## Scope
 - 201 community-reported Turkish phone numbers stored on-device (GPL-3.0 upstream).
 - Tries overriding existing Xiaomi `YellowPagePhone` and `QueryNumberResult` metadata for matching numbers.
-- Does not patch the original priv-app APK, block calls, access Google Dialer data, make network requests, or request phone/contacts permissions.
-- **The Xiaomi in-call overlay is NOT verified.** The correct class loader and runtime method path may differ across ROMs.
+- Does not patch any original system APK, block calls, or access Google Dialer data. Optional user-initiated OpenSpam HTTPS lookups require INTERNET permission; no phone/contacts runtime permissions are requested.
+- Xiaomi's native incoming-call extra-info label was visually verified on HyperOS 4 with the optional two-minute test preview. Automatic real caller number match remains experimental.
 ## Build
-GitHub Actions > Build YellowPage TR LSPosed APK > run workflow; download Artifacts > YellowPage-TR-LSPosed-v0.9-debug-APK.
+GitHub Actions > Build YellowPage TR LSPosed APK > run workflow; download Artifacts > YellowPage-TR-LSPosed-v1.0-debug-APK.
 Android Studio is not needed.
 ## Device test
-Install debug APK, enable it in LSPosed, and scope only the listed Xiaomi packages that actually exist on your phone. Reboot or restart target processes. App UI tests the local CSV only. LSPosed logs: `YellowPageTR/0.9`; `hooks=0` means no matched class in this process.
+Install debug APK, enable it in LSPosed, and scope only the listed Xiaomi packages that actually exist on your phone. Reboot or restart target processes. App UI tests the local CSV only. LSPosed logs: `YellowPageTR/1.0`; `hooks=0` means no matched class in this process.
 Please test using a number you control. Unknown names in an open spam list may be inaccurate. Do not depend on this experiment for emergency or business calls.
 ## License
 Bundled community data is sourced from https://github.com/symbuzzer/Turkish-Spam-Numbers (GPL-3.0). See LICENSES/.
@@ -44,3 +44,10 @@ The v0.7 real incoming-call logs confirmed `incomingCard created=true incoming=t
 
 ## v0.9 incoming call native TextView fix
 v0.8 device logs confirmed `incomingCard nativePreviewLabelSet=true` for real incoming calls, but the user saw only the saved contact name. Inspecting the provided InCallUI APK showed that `CallCardFragment.setYellowPageInfo()` sends **CallCardInfo.extraInfo** to `CallCardOptionalInfoView.showExtraInfo()`; this writes `mCallCardExtraTitle` and controls optional-info view visibility. `markTitle` alone does not provide this route. v0.9 sets both `markTitle` and `extraInfo` for a matched, incoming, non-emergency call, or for the short-lived opt-in preview `YellowPage TR (TEST)`. Existing Xiaomi `markTitle` or `extraInfo` values are preserved. A diagnostic hook checks `extraInfo renderedMethod=true textMatches=true` after `showExtraInfo`. Neither this log nor build success proves the label is visually displayed, which requires an on-device check. To enable the preview for two minutes in PowerShell: `$until=[DateTimeOffset]::UtcNow.AddMinutes(2).ToUnixTimeMilliseconds(); & 'C:\platform-tools\adb.exe' shell settings put global yellowpagetr_preview_until $until`; then receive a call from a trusted number. Disable: `adb shell settings delete global yellowpagetr_preview_until`. No new call-blocking behavior, phone number logging or network permission.
+
+## v1.0 — recommended LSPosed scope and opt-in OpenSpam
+- Legacy API `AndroidManifest.xml` declares `xposedscope=@array/yellowpage_recommended_scope` with `com.android.contacts`, `com.android.incallui`, `com.miui.yellowpage`. `assets/xposed_scope` is retained as a fallback hint. On fresh enable, compatible LSPosed Managers automatically select the recommended apps; existing custom scopes may need the user to apply recommendations. No broad system scope.
+- OpenSpam REST API requires a **user-provided API key** (`X-API-Key`) and only allows free noncommercial access subject to limits. The app offers an explicit manual lookup button, opt-in checkbox, and link to the API panel. User-provided keys are kept only in memory for this session; none are bundled, stored, or logged. **Only explicit manual lookups send a number and API key to OpenSpam**; incoming calls never initiate HTTP requests.
+- Manual lookup results are cached privately for 24 hours under a SHA-256 of normalized phone. If there are at least 3 reports, a lookup from the native InCallUI can display `Olası spam (OpenSpam)` in the existing extraInfo field if no Xiaomi label exists, while the original 201-number offline list continues to show `Olası spam (TR)`.
+- Cross-process cache is exposed only as a yes/no Binder `ContentProvider.call` result to UIDs belonging to Xiaomi InCallUI and Contacts; no raw phone numbers or keys are written into the cache. If the provider is not available, the original call display is unchanged. The OpenSpam cache display path has **not yet been tested on device**; it is an experimental addition to the already-tested native label. Offline original list remains available without network.
+- OpenSpam API: https://api.openspam.es/doc/ . Official rate limits should be checked before use. Suggested test: confirm recommended scope in LSPosed, check offline test, use a manually entered phone with an OpenSpam API key (if available), verify cache result, then test native incoming-call label as appropriate. Do not upload API keys or private incoming phone numbers to GitHub logs.
