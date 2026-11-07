@@ -172,12 +172,12 @@ public final class HookEntry implements IXposedHookLoadPackage {
                         }
                         if(matched) {
                             title.set(card,"Olası spam (TR)");
-                            XposedHelpers.setObjectField(card,"extraInfo","Olası spam (TR)");
+                            writeStringField(card,"extraInfo","Olası spam (TR)");
                             XposedBridge.log(LOG+": incomingCard extraInfoSpamSet=true");
                         } else if(isPreviewWindowOpen()) {
                             // Test only. Never label a trusted caller as spam.
                             title.set(card,"YellowPage TR (TEST)");
-                            XposedHelpers.setObjectField(card,"extraInfo","YellowPage TR (TEST)");
+                            writeStringField(card,"extraInfo","YellowPage TR (TEST)");
                             XposedBridge.log(LOG+": incomingCard extraInfoPreviewSet=true");
                         }
                     } catch(Throwable error) {
@@ -223,6 +223,11 @@ public final class HookEntry implements IXposedHookLoadPackage {
         f.setAccessible(true);
         return f.getBoolean(target);
     }
+    private static void writeStringField(Object target,String field,String value) throws Exception {
+        java.lang.reflect.Field f=target.getClass().getDeclaredField(field);
+        f.setAccessible(true);
+        f.set(target,value);
+    }
     private static String readString(Object target,String field) throws Exception {
         java.lang.reflect.Field f=target.getClass().getDeclaredField(field);
         f.setAccessible(true);
@@ -246,7 +251,9 @@ public final class HookEntry implements IXposedHookLoadPackage {
                         String value=(String)p.args[0];
                         if(!"YellowPage TR (TEST)".equals(value) &&
                             !"Olası spam (TR)".equals(value)) return;
-                        Object title=XposedHelpers.getObjectField(p.thisObject,"mCallCardExtraTitle");
+                        java.lang.reflect.Field f=p.thisObject.getClass().getDeclaredField("mCallCardExtraTitle");
+                        f.setAccessible(true);
+                        Object title=f.get(p.thisObject);
                         boolean textMatches=false;
                         if(title instanceof android.widget.TextView)
                             textMatches=value.contentEquals(
