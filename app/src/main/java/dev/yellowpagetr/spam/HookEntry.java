@@ -14,7 +14,7 @@ import de.robv.android.xposed.XposedHelpers;
 import de.robv.android.xposed.callbacks.XC_LoadPackage;
 /** Experimentally alter existing Xiaomi number-result objects only. */
 public final class HookEntry implements IXposedHookLoadPackage {
-    private static final String LOG="YellowPageTR/0.8";
+    private static final String LOG="YellowPageTR/0.9";
     private static final java.util.concurrent.atomic.AtomicInteger TRACE_COUNT = new java.util.concurrent.atomic.AtomicInteger();
     private static final java.util.concurrent.atomic.AtomicInteger PROVIDER_TRACE_COUNT = new java.util.concurrent.atomic.AtomicInteger();
     private static final java.util.concurrent.atomic.AtomicInteger RESOLVER_TRACE_COUNT = new java.util.concurrent.atomic.AtomicInteger();
@@ -29,7 +29,10 @@ public final class HookEntry implements IXposedHookLoadPackage {
         total+=install(param.classLoader,"com.miui.yellowpage.tool.QueryNumberResult",true);
         if ("com.miui.yellowpage".equals(pkg)) total+=installProvider(param.classLoader);
         total+=installResolver(param.classLoader);
-        if ("com.android.incallui".equals(pkg)) total+=installIncomingCallCard(param.classLoader);
+        if ("com.android.incallui".equals(pkg)) {
+            total+=installIncomingCallCard(param.classLoader);
+            total+=installExtraInfoRenderProbe(param.classLoader);
+        }
         // Entry points verified in the supplied Xiaomi Contacts APK.
         if ("com.android.contacts".equals(pkg)) {
             total+=observe(param.classLoader,
@@ -161,14 +164,21 @@ public final class HookEntry implements IXposedHookLoadPackage {
                             XposedBridge.log(LOG+": incomingCard existingLabelPreserved=true");
                             return;
                         }
+                        String extra=readString(card,"extraInfo");
+                        if(extra!=null && !extra.trim().isEmpty()) {
+                            // Keep all Xiaomi-provided labels and other information.
+                            XposedBridge.log(LOG+": incomingCard existingExtraInfoPreserved=true");
+                            return;
+                        }
                         if(matched) {
                             title.set(card,"Olası spam (TR)");
-                            XposedBridge.log(LOG+": incomingCard nativeLabelSet=true");
+                            XposedHelpers.setObjectField(card,"extraInfo","Olası spam (TR)");
+                            XposedBridge.log(LOG+": incomingCard extraInfoSpamSet=true");
                         } else if(isPreviewWindowOpen()) {
-                            // Never call a normal number "spam". This is a transparent
-                            // preview of the native UI label slot, not classification.
+                            // Test only. Never label a trusted caller as spam.
                             title.set(card,"YellowPage TR (TEST)");
-                            XposedBridge.log(LOG+": incomingCard nativePreviewLabelSet=true");
+                            XposedHelpers.setObjectField(card,"extraInfo","YellowPage TR (TEST)");
+                            XposedBridge.log(LOG+": incomingCard extraInfoPreviewSet=true");
                         }
                     } catch(Throwable error) {
                         XposedBridge.log(LOG+": incomingCard error="+error.getClass().getSimpleName());
@@ -218,6 +228,41 @@ public final class HookEntry implements IXposedHookLoadPackage {
         f.setAccessible(true);
         Object value=f.get(target);
         return value instanceof String?(String)value:null;
+    }
+
+    /** Confirm the native TextView rendering path without logging private data. */
+    private static int installExtraInfoRenderProbe(ClassLoader loader) {
+        try {
+            Class<?> type=XposedHelpers.findClassIfExists(
+                "com.android.incallui.view.CallCardOptionalInfoView",loader);
+            if(type==null) {
+                XposedBridge.log(LOG+": renderViewClassMissing");
+                return 0;
+            }
+            int count=XposedBridge.hookAllMethods(type,"showExtraInfo",new XC_MethodHook() {
+                @Override protected void afterHookedMethod(MethodHookParam p) {
+                    try {
+                        if(p.args==null || p.args.length==0 || !(p.args[0] instanceof String)) return;
+                        String value=(String)p.args[0];
+                        if(!"YellowPage TR (TEST)".equals(value) &&
+                            !"Olası spam (TR)".equals(value)) return;
+                        Object title=XposedHelpers.getObjectField(p.thisObject,"mCallCardExtraTitle");
+                        boolean textMatches=false;
+                        if(title instanceof android.widget.TextView)
+                            textMatches=value.contentEquals(
+                                ((android.widget.TextView)title).getText());
+                        XposedBridge.log(LOG+": extraInfo renderedMethod=true textMatches="+textMatches);
+                    } catch(Throwable e) {
+                        XposedBridge.log(LOG+": extraInfo renderProbeError="+e.getClass().getSimpleName());
+                    }
+                }
+            }).size();
+            XposedBridge.log(LOG+": extraInfoRenderHooks="+count);
+            return count;
+        } catch(Throwable e) {
+            XposedBridge.log(LOG+": extraInfoRenderHookError="+e.getClass().getSimpleName());
+            return 0;
+        }
     }
 
     /** Observe YellowPage's incoming ContentProvider requests; never print URIs or digits. */
