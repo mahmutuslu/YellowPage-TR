@@ -34,19 +34,27 @@ public final class OpenSpamCache {
         context.getSharedPreferences(FILE,Context.MODE_PRIVATE).edit()
             .putString(key,now+"|"+Math.min(reports,999999)).apply();
     }
+    /** True for both a positive and a negative result still valid for 24h. */
+    public static boolean hasFreshResult(Context context,String raw) {
+        return cachedReports(context,raw)!=null;
+    }
     public static boolean hasRisk(Context context,String raw) {
+        Integer count=cachedReports(context,raw);
+        return count!=null && count>=3;
+    }
+    private static Integer cachedReports(Context context,String raw) {
         String key=hash(raw);
-        if(key==null) return false;
+        if(key==null) return null;
         SharedPreferences p=context.getSharedPreferences(FILE,Context.MODE_PRIVATE);
         String entry=p.getString(key,"");
         String[] parts=entry.split("\\|");
-        if(parts.length!=2) return false;
+        if(parts.length!=2) return null;
         try {
             long timestamp=Long.parseLong(parts[0]);
             int reports=Integer.parseInt(parts[1]);
             long elapsed=System.currentTimeMillis()-timestamp;
-            if(elapsed<0 || elapsed>=TTL) return false;
-            return reports>=3;
-        } catch(Exception ignored) {return false;}
+            if(elapsed<0 || elapsed>=TTL) return null;
+            return reports;
+        } catch(Exception ignored) {return null;}
     }
 }
