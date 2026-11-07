@@ -1,4 +1,4 @@
-# YellowPage TR v0.3 — Experimental LSPosed module
+# YellowPage TR v0.4 — Experimental LSPosed module
 This project is a test harness for Xiaomi YellowPage on Xiaomi HyperOS. No Android Studio required.
 ## Scope
 - 201 community-reported Turkish phone numbers stored on-device (GPL-3.0 upstream).
@@ -6,10 +6,10 @@ This project is a test harness for Xiaomi YellowPage on Xiaomi HyperOS. No Andro
 - Does not patch the original priv-app APK, block calls, access Google Dialer data, make network requests, or request phone/contacts permissions.
 - **The Xiaomi in-call overlay is NOT verified.** The correct class loader and runtime method path may differ across ROMs.
 ## Build
-GitHub Actions > Build YellowPage TR LSPosed APK > run workflow; download Artifacts > YellowPage-TR-LSPosed-v0.3-debug-APK.
+GitHub Actions > Build YellowPage TR LSPosed APK > run workflow; download Artifacts > YellowPage-TR-LSPosed-v0.4-debug-APK.
 Android Studio is not needed.
 ## Device test
-Install debug APK, enable it in LSPosed, and scope only the listed Xiaomi packages that actually exist on your phone. Reboot or restart target processes. App UI tests the local CSV only. LSPosed logs: `YellowPageTR/0.3`; `hooks=0` means no matched class in this process.
+Install debug APK, enable it in LSPosed, and scope only the listed Xiaomi packages that actually exist on your phone. Reboot or restart target processes. App UI tests the local CSV only. LSPosed logs: `YellowPageTR/0.4`; `hooks=0` means no matched class in this process.
 Please test using a number you control. Unknown names in an open spam list may be inaccurate. Do not depend on this experiment for emergency or business calls.
 ## License
 Bundled community data is sourced from https://github.com/symbuzzer/Turkish-Spam-Numbers (GPL-3.0). See LICENSES/.
@@ -22,3 +22,10 @@ When a YellowPage/Contacts/InCallUI process calls a hooked number-result method,
 - Records only hook counts and whether a relevant query occurred; **does not record telephone numbers, URIs, or query arguments**.
 - Check `YellowPageTR/0.3` in `/data/adb/lspd/log/modules_*.log` after using the original Xiaomi Phone or YellowPage search UI; no need to place a call.
 - Results are diagnostics, **not** evidence the native incoming-call UI shows a spam warning.
+
+## v0.4 privacy-safe cursor trace
+- The YellowPage ContentProvider is now observed **before and after** query execution.
+- `inputMatch=true` means a local-list number was encountered **in one of the visible query arguments**; `false` does not prove there was no number, since an application may use indirect storage or different encoding.
+- `providerResult cursor=true fields=[...]` reports a maximum of 20 sanitized column **names**, never data rows or phone numbers.
+- No call blocking or network connection is added.
+- v0.4 remains experimental: some Xiaomi processes may use a different path and incoming-call screen display is not established.
