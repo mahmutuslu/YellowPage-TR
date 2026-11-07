@@ -17,7 +17,7 @@ public final class MainActivity extends Activity {
         parent.setGravity(Gravity.TOP);
         parent.setBackgroundColor(Color.WHITE);
         TextView title=new TextView(this);
-        title.setText("YellowPage TR · v0.8");
+        title.setText("YellowPage TR · v0.9");
         title.setTextColor(Color.BLACK);
         title.setTextSize(22);
         parent.addView(title);
