@@ -14,7 +14,7 @@ import de.robv.android.xposed.XposedHelpers;
 import de.robv.android.xposed.callbacks.XC_LoadPackage;
 /** Experimentally alter existing Xiaomi number-result objects only. */
 public final class HookEntry implements IXposedHookLoadPackage {
-    private static final String LOG="YellowPageTR/0.9";
+    private static final String LOG="YellowPageTR/1.0";
     private static final java.util.concurrent.atomic.AtomicInteger TRACE_COUNT = new java.util.concurrent.atomic.AtomicInteger();
     private static final java.util.concurrent.atomic.AtomicInteger PROVIDER_TRACE_COUNT = new java.util.concurrent.atomic.AtomicInteger();
     private static final java.util.concurrent.atomic.AtomicInteger RESOLVER_TRACE_COUNT = new java.util.concurrent.atomic.AtomicInteger();
@@ -170,10 +170,27 @@ public final class HookEntry implements IXposedHookLoadPackage {
                             XposedBridge.log(LOG+": incomingCard existingExtraInfoPreserved=true");
                             return;
                         }
-                        if(matched) {
-                            title.set(card,"Olası spam (TR)");
-                            writeStringField(card,"extraInfo","Olası spam (TR)");
-                            XposedBridge.log(LOG+": incomingCard extraInfoSpamSet=true");
+                        boolean onlineCachedRisk=false;
+                        if(!matched) {
+                            String candidate=readString(card,"phoneNumber");
+                            if(candidate==null && cache!=null) {
+                                try { candidate=readString(cache,"number"); }
+                                catch(Throwable ignored) {}
+                            }
+                            if(candidate==null) {
+                                try {
+                                    Object candidateObject=XposedHelpers.callMethod(call,"getNumber");
+                                    if(candidateObject instanceof String) candidate=(String)candidateObject;
+                                } catch(Throwable ignored) {}
+                            }
+                            onlineCachedRisk=hasCachedOpenSpamRisk(candidate);
+                        }
+                        if(matched || onlineCachedRisk) {
+                            String label=matched?"Olası spam (TR)":"Olası spam (OpenSpam)";
+                            title.set(card,label);
+                            writeStringField(card,"extraInfo",label);
+                            XposedBridge.log(LOG+": incomingCard extraInfoSpamSet=true source="+
+                                (matched?"local":"openspamCache"));
                         } else if(isPreviewWindowOpen()) {
                             // Test only. Never label a trusted caller as spam.
                             title.set(card,"YellowPage TR (TEST)");
@@ -214,6 +231,30 @@ public final class HookEntry implements IXposedHookLoadPackage {
             return remaining>0 && remaining<=180000L;
         } catch(Throwable e) {
             XposedBridge.log(LOG+": incomingCard previewCheckError="+e.getClass().getSimpleName());
+            return false;
+        }
+    }
+
+    /**
+     * Device-local, previously user-approved OpenSpam results only.
+     * This never makes a network request; failures leave call UI untouched.
+     * The separate provider is restricted to verified Xiaomi callers by UID.
+     */
+    private static boolean hasCachedOpenSpamRisk(String candidate) {
+        if(SpamDb.normalize(candidate)==null) return false;
+        try {
+            Class<?> thread=Class.forName("android.app.ActivityThread");
+            Method current=thread.getDeclaredMethod("currentApplication");
+            current.setAccessible(true);
+            Object application=current.invoke(null);
+            if(!(application instanceof Context)) return false;
+            Bundle args=new Bundle();
+            args.putString("phone",candidate);
+            Bundle response=((Context)application).getContentResolver().call(
+                Uri.parse("content://dev.yellowpagetr.spam.cache/risk"),
+                "hasRisk",null,args);
+            return response!=null && response.getBoolean("risk",false);
+        } catch(Throwable ignored) {
             return false;
         }
     }
