@@ -43,7 +43,7 @@ public final class DailyOfflineList {
     private static synchronized HashSet<String> getSet(Context c) {
         SharedPreferences p=prefs(c);
         long timestamp=p.getLong(TIME,0L);
-        if(timestamp>0 && cachedNumbers!=null && timestamp==cachedTimestamp)
+        if(cachedNumbers!=null && timestamp==cachedTimestamp)
             return cachedNumbers;
         HashSet<String> items=new HashSet<>();
         if(timestamp>0) {
