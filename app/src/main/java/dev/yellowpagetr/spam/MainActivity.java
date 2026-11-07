@@ -18,6 +18,9 @@ import android.widget.TextView;
 public final class MainActivity extends Activity {
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
+        DailySpamSyncJob.schedule(this);
+        // Online automatic lookups are suspended in favor of local daily feeds.
+        OpenSpamSettings.setEnabled(this,false);
         int p=(int)(18*getResources().getDisplayMetrics().density);
         ScrollView scroll=new ScrollView(this);
         LinearLayout parent=new LinearLayout(this);
@@ -28,15 +31,15 @@ public final class MainActivity extends Activity {
         scroll.addView(parent);
 
         TextView title=new TextView(this);
-        title.setText("YellowPage TR · v1.1 — Xiaomi ayarları");
+        title.setText("YellowPage TR · v1.2 — Xiaomi YellowPage");
         title.setTextColor(Color.BLACK);
         title.setTextSize(23);
         parent.addView(title);
 
         TextView explanation=new TextView(this);
         explanation.setText("Xiaomi'nin telefona yerleşik YellowPage ve gelen arama ekranına ek veri kaynağı. "
-            +"Yerel listede "+SpamDb.size()+" şüpheli numara var. "
-            +"OpenSpam otomatik sorgu varsayılan olarak kapalıdır. Sadece siz etkinleştirirseniz gelen çağrı numaraları internete gönderilir.");
+            +"Telefon yalnızca güncellenmiş çevrimdışı listeden uyarı üretir. "
+            +"OpenSpam toplu liste için özel izin gerektirir; hiçbir gelen çağrı numarası internete gönderilmez.");
         explanation.setTextColor(Color.DKGRAY);
         explanation.setTextSize(15);
         explanation.setPadding(0,p,0,p);
@@ -59,10 +62,8 @@ public final class MainActivity extends Activity {
         test.setOnClickListener(v->{
             String raw=number.getText().toString();
             if(SpamDb.normalize(raw)==null) answer.setText("Geçerli Türkiye numarası girin.");
-            else if(SpamDb.contains(raw))
+            else if(DailyOfflineList.contains(this,raw))
                 answer.setText("Yerel listede var: olası spam. Yanlış pozitif olabilir; otomatik engelleme yok.");
-            else if(OpenSpamCache.hasRisk(this,raw))
-                answer.setText("OpenSpam önbelleğinde en az 3 rapor var (son 24 saat).");
             else answer.setText("Yerel listede yok. Güvenilir olduğu anlamına gelmez.");
         });
         parent.addView(test);
@@ -99,68 +100,52 @@ public final class MainActivity extends Activity {
         apiKey.setHint("OpenSpam API anahtarı");
         parent.addView(apiKey);
 
-        TextView nativeSection=new TextView(this);
-        nativeSection.setText("Yerleşik Xiaomi YellowPage — otomatik OpenSpam");
-        nativeSection.setTextColor(Color.BLACK);
-        nativeSection.setTextSize(19);
-        nativeSection.setPadding(0,p,0,p/2);
-        parent.addView(nativeSection);
+        TextView dailyTitle=new TextView(this);
+        dailyTitle.setText("Günlük Türkiye spam listesi");
+        dailyTitle.setTextColor(Color.BLACK);
+        dailyTitle.setTextSize(19);
+        dailyTitle.setPadding(0,p,0,p/2);
+        parent.addView(dailyTitle);
 
-        TextView nativeInfo=new TextView(this);
-        nativeInfo.setText("AÇARSANIZ: Xiaomi YellowPage gelen çağrı sorgularında Türkiye "
-            +"numaraları OpenSpam API'sine gönderilebilir. Servis numara ve IP "
-            +"bilgilerini kaydedebilir. Telefon aramalarınız engellenmez; "
-            +"orijinal Xiaomi uygulaması ve kişi adları korunur. "
-            +"Numara sorgusu ağda yapılırken arama ekranı bekletilmez. "
-            +"Sorgu sonucu arama bitmeden yetişmezse sonraki aramada kullanılır. "
-            +"API anahtarı cihazda Android Keystore ile şifreli saklanır.");
-        nativeInfo.setTextColor(Color.DKGRAY);
-        nativeInfo.setTextSize(14);
-        parent.addView(nativeInfo);
+        TextView dailyInfo=new TextView(this);
+        dailyInfo.setTextColor(Color.DKGRAY);
+        dailyInfo.setTextSize(14);
+        long last=DailyOfflineList.updatedAt(this);
+        dailyInfo.setText(last==0 ?
+            "İlk güncelleme planlandı; paket içindeki 201 numaralık liste kullanılacak." :
+            "Son başarılı güncelleme: "+
+            new java.text.SimpleDateFormat("dd.MM.yyyy HH:mm",
+                java.util.Locale.forLanguageTag("tr-TR")).format(new java.util.Date(last))+
+            " · "+DailyOfflineList.count(this)+" numara");
+        parent.addView(dailyInfo);
 
-        CheckBox nativeConsent=new CheckBox(this);
-        nativeConsent.setText("Gelen çağrı numaralarını OpenSpam'e otomatik göndermeyi kabul ediyorum.");
-        nativeConsent.setTextColor(Color.BLACK);
-        nativeConsent.setChecked(OpenSpamSettings.enabled(this));
-        parent.addView(nativeConsent);
+        TextView dailySource=new TextView(this);
+        dailySource.setTextColor(Color.DKGRAY);
+        dailySource.setTextSize(13);
+        dailySource.setText("Kaynak: Turkish-Spam-Numbers (GPL-3.0), OpenSpam değil. "+
+            "Yalnızca liste indirilir; arayan numarası gönderilmez. "+
+            "OpenSpam tam liste erişimi onaylandığında ayrıca bağlanabilir.");
+        parent.addView(dailySource);
 
-        TextView nativeStatus=new TextView(this);
-        nativeStatus.setTextColor(Color.DKGRAY);
-        nativeStatus.setText(OpenSpamSettings.enabled(this) ?
-            "Otomatik Xiaomi YellowPage sorgusu açık" :
-            "Otomatik Xiaomi YellowPage sorgusu kapalı (varsayılan)");
-        parent.addView(nativeStatus);
-
-        Button saveNative=new Button(this);
-        saveNative.setText("Xiaomi YellowPage entegrasyon ayarını kaydet");
-        saveNative.setOnClickListener(v->{
-            if(!nativeConsent.isChecked()) {
-                OpenSpamSettings.setEnabled(this,false);
-                nativeStatus.setText("Otomatik sorgu kapatıldı; gelen çağrılarda internet kullanılmaz.");
-                return;
-            }
-            String typed=apiKey.getText().toString().trim();
-            if(!typed.isEmpty() && !OpenSpamSettings.saveKey(this,typed)) {
-                nativeStatus.setText("API anahtarı şifrelenemedi, otomatik sorgu açılmadı.");
-                return;
-            }
-            if(OpenSpamSettings.setEnabled(this,true))
-                nativeStatus.setText("Otomatik sorgu açıldı. Xiaomi YellowPage artık istenirse "
-                    +"arka planda OpenSpam kontrolü başlatabilir.");
-            else
-                nativeStatus.setText("Önce yukarıya geçerli OpenSpam API anahtarı gir.");
+        Button dailyButton=new Button(this);
+        dailyButton.setText("Çevrimdışı listeyi şimdi güncelle");
+        dailyButton.setOnClickListener(v->{
+            dailyButton.setEnabled(false);
+            dailyInfo.setText("Liste güvenli bağlantıdan güncelleniyor...");
+            new Thread(()->{
+                boolean ok=DailyOfflineList.refresh(this);
+                runOnUiThread(()->{
+                    dailyButton.setEnabled(true);
+                    if(!ok) dailyInfo.setText("Güncelleme olmadı; mevcut liste korunuyor.");
+                    else dailyInfo.setText("Liste yenilendi: "+
+                        DailyOfflineList.count(this)+" numara · "+
+                        new java.text.SimpleDateFormat("dd.MM.yyyy HH:mm",
+                            java.util.Locale.forLanguageTag("tr-TR"))
+                            .format(new java.util.Date(DailyOfflineList.updatedAt(this))));
+                });
+            },"DailyOfflineListManual").start();
         });
-        parent.addView(saveNative);
-
-        Button removeNative=new Button(this);
-        removeNative.setText("Otomatik entegrasyonu kapat ve kaydedilen API anahtarını sil");
-        removeNative.setOnClickListener(v->{
-            OpenSpamSettings.clear(this);
-            nativeConsent.setChecked(false);
-            apiKey.setText("");
-            nativeStatus.setText("Otomatik sorgu kapalı; şifreli anahtar silindi.");
-        });
-        parent.addView(removeNative);
+        parent.addView(dailyButton);
 
         CheckBox consent=new CheckBox(this);
         consent.setText("Bu numarayı OpenSpam'e göndermeyi kabul ediyorum.");
@@ -212,7 +197,7 @@ public final class MainActivity extends Activity {
                     } else if(result.reports>=3) {
                         onlineResult.setText("OpenSpam: "+result.reports+" bildirim. "
                             +"Tür: "+result.category+". Düzey: "+result.danger+". "
-                            +"Bu kayıt 24 saat boyunca yerel arama etiketi için kullanılabilir. "
+                            +"Bu sorgu yalnızca 24 saatlik önbelleğe kaydedilir; tam veritabanı değildir. "
                             +"Yanlış pozitif olabilir.");
                     } else if(result.reports>0) {
                         onlineResult.setText("OpenSpam: "+result.reports+
@@ -226,7 +211,8 @@ public final class MainActivity extends Activity {
 
         TextView footer=new TextView(this);
         footer.setText("LSPosed önerilen kapsam: Xiaomi Telefon/Kişiler, Gelen Arama ve YellowPage. "
-            +"Arama otomatik engellenmez. Otomatik çevrimiçi sorgu yalnızca yukarıdaki açık rızayla etkinleşir.");
+            +"Arama otomatik engellenmez. Gelen aramalarda OpenSpam'e sorgu gönderilmez. "+
+            "OpenSpam tam liste senkronu için ayrıca yetkili veri erişimi gerekir.");
         footer.setTextColor(Color.DKGRAY);
         footer.setTextSize(13);
         parent.addView(footer);
