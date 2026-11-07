@@ -10,10 +10,11 @@ import de.robv.android.xposed.XposedHelpers;
 import de.robv.android.xposed.callbacks.XC_LoadPackage;
 /** Experimentally alter existing Xiaomi number-result objects only. */
 public final class HookEntry implements IXposedHookLoadPackage {
-    private static final String LOG="YellowPageTR/0.4";
+    private static final String LOG="YellowPageTR/0.5";
     private static final java.util.concurrent.atomic.AtomicInteger TRACE_COUNT = new java.util.concurrent.atomic.AtomicInteger();
     private static final java.util.concurrent.atomic.AtomicInteger PROVIDER_TRACE_COUNT = new java.util.concurrent.atomic.AtomicInteger();
     private static final java.util.concurrent.atomic.AtomicInteger RESOLVER_TRACE_COUNT = new java.util.concurrent.atomic.AtomicInteger();
+    private static final java.util.concurrent.atomic.AtomicInteger ENTRY_TRACE_COUNT = new java.util.concurrent.atomic.AtomicInteger();
     @Override public void handleLoadPackage(XC_LoadPackage.LoadPackageParam param) {
         String pkg=param.packageName;
         if (!"com.miui.yellowpage".equals(pkg) && !"com.android.contacts".equals(pkg)
@@ -23,7 +24,55 @@ public final class HookEntry implements IXposedHookLoadPackage {
         total+=install(param.classLoader,"com.miui.yellowpage.tool.QueryNumberResult",true);
         if ("com.miui.yellowpage".equals(pkg)) total+=installProvider(param.classLoader);
         total+=installResolver(param.classLoader);
+        // Entry points verified in the supplied Xiaomi Contacts APK.
+        if ("com.android.contacts".equals(pkg)) {
+            total+=observe(param.classLoader,
+                "com.android.contacts.list.TwelveKeyDialerFragment","E7","dialerFilter");
+            total+=observe(param.classLoader,
+                "com.android.contacts.dialer.list.DialerListDataSource","Q0","t9Query");
+            total+=observe(param.classLoader,
+                "com.android.contacts.detail.yellowpage.YellowPagePhoneLoader","J","detailLookup");
+        }
+        total+=observe(param.classLoader,"miui.yellowpage.YellowPageUtils","getPhoneInfo","phoneInfo");
+        total+=observe(param.classLoader,"miui.yellowpage.YellowPageUtils","getAntispamNumberCategory","spamCategory");
+        total+=observe(param.classLoader,"miui.yellowpage.YellowPageUtils","queryPhoneInfo","queryPhoneInfo");
         XposedBridge.log(LOG+": process="+pkg+" hooks="+total+" offlineEntries="+SpamDb.size());
+    }
+
+    /**
+     * Diagnostic-only hooks to verified Xiaomi API entry points.
+     * Does not alter any return values and never writes telephone numbers to logs.
+     */
+    private static int observe(ClassLoader loader,String klass,String method,String label) {
+        try {
+            Class<?> target=XposedHelpers.findClassIfExists(klass,loader);
+            if(target==null) {
+                XposedBridge.log(LOG+": missingEntry="+label);
+                return 0;
+            }
+            int count=XposedBridge.hookAllMethods(target,method,new XC_MethodHook() {
+                @Override protected void beforeHookedMethod(MethodHookParam p) {
+                    try {
+                        if(ENTRY_TRACE_COUNT.incrementAndGet()<=120)
+                            XposedBridge.log(LOG+": entry="+label+" inputMatch="+inputMatches(p.args));
+                    } catch(Throwable ignored) {}
+                }
+                @Override protected void afterHookedMethod(MethodHookParam p) {
+                    try {
+                        if(ENTRY_TRACE_COUNT.get()<=120) {
+                            Object result=p.getResult();
+                            XposedBridge.log(LOG+": exit="+label+" resultPresent="+
+                                (result!=null)+" resultMatch="+matches(result));
+                        }
+                    } catch(Throwable ignored) {}
+                }
+            }).size();
+            XposedBridge.log(LOG+": installedEntry="+label+" count="+count);
+            return count;
+        } catch(Throwable e) {
+            XposedBridge.log(LOG+": entryError="+label+" type="+e.getClass().getSimpleName());
+            return 0;
+        }
     }
 
     /** Observe YellowPage's incoming ContentProvider requests; never print URIs or digits. */
