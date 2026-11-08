@@ -31,7 +31,7 @@ public final class MainActivity extends Activity {
         parent.setBackgroundColor(Color.WHITE);
         scroll.addView(parent);
         TextView heading=new TextView(this);
-        heading.setText("YellowPage TR · v1.3");
+        heading.setText("YellowPage TR · v2.0 · Xposed API 102");
         heading.setTextColor(Color.BLACK);
         heading.setTextSize(24);
         parent.addView(heading);
