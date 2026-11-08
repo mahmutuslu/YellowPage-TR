@@ -462,7 +462,7 @@ public final class HookEntry extends XposedModule {
     }
 
     /** API 102 hook adapter: performs legacy-style before/after callbacks through
-     * modern libxposed interceptor chains. This is not an XposedBridge shim. */
+     * modern libxposed interceptor chains. This adapter does not invoke the legacy Xposed API. */
     private static final class HookParam {
         final Object thisObject;
         final Object[] args;
