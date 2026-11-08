@@ -1,23 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- Used only by background downloads of the public licensed CSV. -->
+    <!-- Network access is for the daily public spam CSV only, NEVER for incoming calls. -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
-    <!-- Allow UID validation of the Xiaomi packages querying the local cache. -->
     <queries>
         <package android:name="com.android.incallui" />
         <package android:name="com.android.contacts" />
         <package android:name="com.miui.yellowpage" />
     </queries>
-    <application android:allowBackup="false" android:label="@string/app_name" android:description="@string/app_description" android:theme="@android:style/Theme.Material.Light.NoActionBar">
-        <meta-data android:name="xposedmodule" android:value="true" />
-        <meta-data android:name="xposeddescription" android:value="@string/app_description" />
-        <meta-data android:name="xposedminversion" android:value="82" />
-        <!-- LSPosed legacy API: preselect only the three Xiaomi packages used by this module. -->
-        <meta-data android:name="xposedscope" android:resource="@array/yellowpage_recommended_scope" />
-        <!-- No network in this provider; Binder UID is validated on every call. -->
-        <receiver android:name=".BootSyncReceiver"
-            android:enabled="true" android:exported="false">
+    <application
+        android:allowBackup="false"
+        android:label="@string/app_name"
+        android:description="@string/app_description"
+        android:theme="@android:style/Theme.Material.Light.NoActionBar">
+        <receiver
+            android:name=".BootSyncReceiver"
+            android:enabled="true"
+            android:exported="false">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED"/>
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED"/>

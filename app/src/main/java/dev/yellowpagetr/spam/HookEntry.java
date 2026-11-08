@@ -1,5 +1,8 @@
 package dev.yellowpagetr.spam;
 import java.lang.reflect.Method;
+import io.github.libxposed.api.XposedModule;
+import io.github.libxposed.api.XposedModuleInterface.PackageReadyParam;
+import java.util.concurrent.atomic.AtomicBoolean;
 import android.net.Uri;
 import android.os.Bundle;
 import android.database.Cursor;
@@ -7,47 +10,44 @@ import android.content.Context;
 import android.os.Handler;
 import android.os.Looper;
 import android.widget.Toast;
-import de.robv.android.xposed.IXposedHookLoadPackage;
-import de.robv.android.xposed.XC_MethodHook;
-import de.robv.android.xposed.XposedBridge;
-import de.robv.android.xposed.XposedHelpers;
-import de.robv.android.xposed.callbacks.XC_LoadPackage;
 /** Experimentally alter existing Xiaomi number-result objects only. */
-public final class HookEntry implements IXposedHookLoadPackage {
-    private static final String LOG="YellowPageTR/1.3";
+public final class HookEntry extends XposedModule {
+    private final AtomicBoolean initialized=new AtomicBoolean(false);
+    private static final String LOG="YellowPageTR/2.0";
     private static final java.util.concurrent.atomic.AtomicInteger TRACE_COUNT = new java.util.concurrent.atomic.AtomicInteger();
     private static final java.util.concurrent.atomic.AtomicInteger PROVIDER_TRACE_COUNT = new java.util.concurrent.atomic.AtomicInteger();
     private static final java.util.concurrent.atomic.AtomicInteger RESOLVER_TRACE_COUNT = new java.util.concurrent.atomic.AtomicInteger();
     private static final java.util.concurrent.atomic.AtomicInteger ENTRY_TRACE_COUNT = new java.util.concurrent.atomic.AtomicInteger();
     private static final java.util.concurrent.atomic.AtomicLong LAST_NOTICE_AT = new java.util.concurrent.atomic.AtomicLong(0L);
-    @Override public void handleLoadPackage(XC_LoadPackage.LoadPackageParam param) {
-        String pkg=param.packageName;
+    @Override public void onPackageReady(PackageReadyParam param) {
+        String pkg=param.getPackageName();
         if (!"com.miui.yellowpage".equals(pkg) && !"com.android.contacts".equals(pkg)
-            && !"com.android.incallui".equals(pkg) && !"com.miui.antispam".equals(pkg)) return;
+            && !"com.android.incallui".equals(pkg)) return;
+        if (!initialized.compareAndSet(false,true)) return;
         int total=0;
-        total+=install(param.classLoader,"miui.yellowpage.YellowPagePhone",false);
-        total+=install(param.classLoader,"com.miui.yellowpage.tool.QueryNumberResult",true);
-        if ("com.miui.yellowpage".equals(pkg)) total+=installProvider(param.classLoader);
-        total+=installResolver(param.classLoader);
+        total+=install(param.getClassLoader(),"miui.yellowpage.YellowPagePhone",false);
+        total+=install(param.getClassLoader(),"com.miui.yellowpage.tool.QueryNumberResult",true);
+        if ("com.miui.yellowpage".equals(pkg)) total+=installProvider(param.getClassLoader());
+        total+=installResolver(param.getClassLoader());
         if ("com.android.incallui".equals(pkg)) {
-            total+=installIncomingCallCard(param.classLoader);
-            total+=installExtraInfoRenderProbe(param.classLoader);
+            total+=installIncomingCallCard(param.getClassLoader());
+            total+=installExtraInfoRenderProbe(param.getClassLoader());
         }
         // Offline daily feed is provided to Xiaomi's existing number matching hooks.
         // No network calls are initiated during incoming calls.
         // Entry points verified in the supplied Xiaomi Contacts APK.
         if ("com.android.contacts".equals(pkg)) {
-            total+=observe(param.classLoader,
+            total+=observe(param.getClassLoader(),
                 "com.android.contacts.list.TwelveKeyDialerFragment","E7","dialerFilter");
-            total+=observe(param.classLoader,
+            total+=observe(param.getClassLoader(),
                 "com.android.contacts.dialer.list.DialerListDataSource","Q0","t9Query");
-            total+=observe(param.classLoader,
+            total+=observe(param.getClassLoader(),
                 "com.android.contacts.detail.yellowpage.YellowPagePhoneLoader","J","detailLookup");
         }
-        total+=observe(param.classLoader,"miui.yellowpage.YellowPageUtils","getPhoneInfo","phoneInfo");
-        total+=observe(param.classLoader,"miui.yellowpage.YellowPageUtils","getAntispamNumberCategory","spamCategory");
-        total+=observe(param.classLoader,"miui.yellowpage.YellowPageUtils","queryPhoneInfo","queryPhoneInfo");
-        XposedBridge.log(LOG+": process="+pkg+" hooks="+total+" offlineEntries="+SpamDb.size());
+        total+=observe(param.getClassLoader(),"miui.yellowpage.YellowPageUtils","getPhoneInfo","phoneInfo");
+        total+=observe(param.getClassLoader(),"miui.yellowpage.YellowPageUtils","getAntispamNumberCategory","spamCategory");
+        total+=observe(param.getClassLoader(),"miui.yellowpage.YellowPageUtils","queryPhoneInfo","queryPhoneInfo");
+        log(LOG+": process="+pkg+" hooks="+total+" offlineEntries="+SpamDb.size());
     }
 
     /**
@@ -80,36 +80,36 @@ public final class HookEntry implements IXposedHookLoadPackage {
      * Diagnostic-only hooks to verified Xiaomi API entry points.
      * Does not alter any return values and never writes telephone numbers to logs.
      */
-    private static int observe(ClassLoader loader,String klass,String method,String label) {
+    private int observe(ClassLoader loader,String klass,String method,String label) {
         try {
-            Class<?> target=XposedHelpers.findClassIfExists(klass,loader);
+            Class<?> target=findClassIfExists(klass,loader);
             if(target==null) {
-                XposedBridge.log(LOG+": missingEntry="+label);
+                log(LOG+": missingEntry="+label);
                 return 0;
             }
-            int count=XposedBridge.hookAllMethods(target,method,new XC_MethodHook() {
-                @Override protected void beforeHookedMethod(MethodHookParam p) {
+            int count=hookAllMethods(target,method,new HookCallback() {
+                @Override protected void beforeHookedMethod(HookParam p) {
                     try {
                         boolean matched=inputMatches(p.args);
                         if(ENTRY_TRACE_COUNT.incrementAndGet()<=120)
-                            XposedBridge.log(LOG+": entry="+label+" inputMatch="+matched);
+                            log(LOG+": entry="+label+" inputMatch="+matched);
                         // Native call-card label only; no intrusive toast.
                     } catch(Throwable ignored) {}
                 }
-                @Override protected void afterHookedMethod(MethodHookParam p) {
+                @Override protected void afterHookedMethod(HookParam p) {
                     try {
                         if(ENTRY_TRACE_COUNT.get()<=120) {
                             Object result=p.getResult();
-                            XposedBridge.log(LOG+": exit="+label+" resultPresent="+
+                            log(LOG+": exit="+label+" resultPresent="+
                                 (result!=null)+" resultMatch="+matches(result));
                         }
                     } catch(Throwable ignored) {}
                 }
-            }).size();
-            XposedBridge.log(LOG+": installedEntry="+label+" count="+count);
+            });
+            log(LOG+": installedEntry="+label+" count="+count);
             return count;
         } catch(Throwable e) {
-            XposedBridge.log(LOG+": entryError="+label+" type="+e.getClass().getSimpleName());
+            log(LOG+": entryError="+label+" type="+e.getClass().getSimpleName());
             return 0;
         }
     }
@@ -129,7 +129,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
             current.setAccessible(true);
             Object value=current.invoke(null);
             if(!(value instanceof Context)) {
-                XposedBridge.log(LOG+": dialerNotice noApplicationContext");
+                log(LOG+": dialerNotice noApplicationContext");
                 return;
             }
             final Context context=(Context)value;
@@ -137,14 +137,14 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 @Override public void run() {
                     try {
                         Toast.makeText(context,"Olası spam (TR)",Toast.LENGTH_LONG).show();
-                        XposedBridge.log(LOG+": dialerNotice shown=true");
+                        log(LOG+": dialerNotice shown=true");
                     } catch(Throwable e) {
-                        XposedBridge.log(LOG+": dialerNotice error="+e.getClass().getSimpleName());
+                        log(LOG+": dialerNotice error="+e.getClass().getSimpleName());
                     }
                 }
             });
         } catch(Throwable e) {
-            XposedBridge.log(LOG+": dialerNotice error="+e.getClass().getSimpleName());
+            log(LOG+": dialerNotice error="+e.getClass().getSimpleName());
         }
     }
 
@@ -153,18 +153,18 @@ public final class HookEntry implements IXposedHookLoadPackage {
      * No outgoing calls, call blocking, caller name, avatar, or call state changes.
      * Do not expose the phone number in LSPosed logs.
      */
-    private static int installIncomingCallCard(ClassLoader loader) {
+    private int installIncomingCallCard(ClassLoader loader) {
         final String cls="com.android.incallui.model.CallCardInfo";
         try {
-            Class<?> type=XposedHelpers.findClassIfExists(cls,loader);
+            Class<?> type=findClassIfExists(cls,loader);
             if(type==null) {
-                XposedBridge.log(LOG+": incomingCardClassMissing");
+                log(LOG+": incomingCardClassMissing");
                 return 0;
             }
-            int count=XposedBridge.hookAllMethods(type,"createCallCardInfo",new XC_MethodHook() {
+            int count=hookAllMethods(type,"createCallCardInfo",new HookCallback() {
                 private final java.util.concurrent.atomic.AtomicInteger traces=
                     new java.util.concurrent.atomic.AtomicInteger();
-                @Override protected void afterHookedMethod(MethodHookParam p) {
+                @Override protected void afterHookedMethod(HookParam p) {
                     try {
                         Object card=p.getResult();
                         Object call=p.args!=null && p.args.length>0 ? p.args[0] : null;
@@ -176,12 +176,12 @@ public final class HookEntry implements IXposedHookLoadPackage {
                         if(!matched && cache!=null) matched=hasOfflineSpam(readString(cache,"number"));
                         if(!matched) {
                             try {
-                                Object num=XposedHelpers.callMethod(call,"getNumber");
+                                Object num=callMethod(call,"getNumber");
                                 matched=num instanceof String && hasOfflineSpam((String)num);
                             } catch(Throwable ignored) {}
                         }
                         if(traces.incrementAndGet()<=80)
-                            XposedBridge.log(LOG+": incomingCard created=true incoming="+incoming+
+                            log(LOG+": incomingCard created=true incoming="+incoming+
                                 " emergency="+emergency+" matched="+matched);
                         if(!incoming || emergency) return;
                         // Do not override an existing Xiaomi classification.
@@ -189,34 +189,34 @@ public final class HookEntry implements IXposedHookLoadPackage {
                         title.setAccessible(true);
                         Object existing=title.get(card);
                         if(existing instanceof String && !((String)existing).trim().isEmpty()) {
-                            XposedBridge.log(LOG+": incomingCard existingLabelPreserved=true");
+                            log(LOG+": incomingCard existingLabelPreserved=true");
                             return;
                         }
                         String extra=readString(card,"extraInfo");
                         if(extra!=null && !extra.trim().isEmpty()) {
                             // Keep all Xiaomi-provided labels and other information.
-                            XposedBridge.log(LOG+": incomingCard existingExtraInfoPreserved=true");
+                            log(LOG+": incomingCard existingExtraInfoPreserved=true");
                             return;
                         }
                         if(matched) {
                             title.set(card,"Olası spam (TR)");
                             writeStringField(card,"extraInfo","Olası spam (TR)");
-                            XposedBridge.log(LOG+": incomingCard extraInfoSpamSet=true source=dailyOffline");
+                            log(LOG+": incomingCard extraInfoSpamSet=true source=dailyOffline");
                         } else if(isPreviewWindowOpen()) {
                             // Test only. Never label a trusted caller as spam.
                             title.set(card,"YellowPage TR (TEST)");
                             writeStringField(card,"extraInfo","YellowPage TR (TEST)");
-                            XposedBridge.log(LOG+": incomingCard extraInfoPreviewSet=true");
+                            log(LOG+": incomingCard extraInfoPreviewSet=true");
                         }
                     } catch(Throwable error) {
-                        XposedBridge.log(LOG+": incomingCard error="+error.getClass().getSimpleName());
+                        log(LOG+": incomingCard error="+error.getClass().getSimpleName());
                     }
                 }
-            }).size();
-            XposedBridge.log(LOG+": incomingCardHooks="+count);
+            });
+            log(LOG+": incomingCardHooks="+count);
             return count;
         } catch(Throwable e) {
-            XposedBridge.log(LOG+": incomingCardHookError="+e.getClass().getSimpleName());
+            log(LOG+": incomingCardHookError="+e.getClass().getSimpleName());
             return 0;
         }
     }
@@ -232,7 +232,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
             current.setAccessible(true);
             Object application=current.invoke(null);
             if(!(application instanceof Context)) {
-                XposedBridge.log(LOG+": incomingCard previewContextMissing");
+                log(LOG+": incomingCard previewContextMissing");
                 return false;
             }
             long deadline=android.provider.Settings.Global.getLong(
@@ -241,7 +241,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
             long remaining=deadline-System.currentTimeMillis();
             return remaining>0 && remaining<=180000L;
         } catch(Throwable e) {
-            XposedBridge.log(LOG+": incomingCard previewCheckError="+e.getClass().getSimpleName());
+            log(LOG+": incomingCard previewCheckError="+e.getClass().getSimpleName());
             return false;
         }
     }
@@ -264,16 +264,16 @@ public final class HookEntry implements IXposedHookLoadPackage {
     }
 
     /** Confirm the native TextView rendering path without logging private data. */
-    private static int installExtraInfoRenderProbe(ClassLoader loader) {
+    private int installExtraInfoRenderProbe(ClassLoader loader) {
         try {
-            Class<?> type=XposedHelpers.findClassIfExists(
+            Class<?> type=findClassIfExists(
                 "com.android.incallui.view.CallCardOptionalInfoView",loader);
             if(type==null) {
-                XposedBridge.log(LOG+": renderViewClassMissing");
+                log(LOG+": renderViewClassMissing");
                 return 0;
             }
-            int count=XposedBridge.hookAllMethods(type,"showExtraInfo",new XC_MethodHook() {
-                @Override protected void afterHookedMethod(MethodHookParam p) {
+            int count=hookAllMethods(type,"showExtraInfo",new HookCallback() {
+                @Override protected void afterHookedMethod(HookParam p) {
                     try {
                         if(p.args==null || p.args.length==0 || !(p.args[0] instanceof String)) return;
                         String value=(String)p.args[0];
@@ -286,68 +286,68 @@ public final class HookEntry implements IXposedHookLoadPackage {
                         if(title instanceof android.widget.TextView)
                             textMatches=value.contentEquals(
                                 ((android.widget.TextView)title).getText());
-                        XposedBridge.log(LOG+": extraInfo renderedMethod=true textMatches="+textMatches);
+                        log(LOG+": extraInfo renderedMethod=true textMatches="+textMatches);
                     } catch(Throwable e) {
-                        XposedBridge.log(LOG+": extraInfo renderProbeError="+e.getClass().getSimpleName());
+                        log(LOG+": extraInfo renderProbeError="+e.getClass().getSimpleName());
                     }
                 }
-            }).size();
-            XposedBridge.log(LOG+": extraInfoRenderHooks="+count);
+            });
+            log(LOG+": extraInfoRenderHooks="+count);
             return count;
         } catch(Throwable e) {
-            XposedBridge.log(LOG+": extraInfoRenderHookError="+e.getClass().getSimpleName());
+            log(LOG+": extraInfoRenderHookError="+e.getClass().getSimpleName());
             return 0;
         }
     }
 
     /** Observe YellowPage's incoming ContentProvider requests; never print URIs or digits. */
-    private static int installProvider(ClassLoader loader) {
+    private int installProvider(ClassLoader loader) {
         try {
-            Class<?> type = XposedHelpers.findClassIfExists(
+            Class<?> type = findClassIfExists(
                 "com.miui.yellowpage.providers.yellowpage.YellowPageProvider", loader);
             if (type == null) {
-                XposedBridge.log(LOG+": providerClassMissing");
+                log(LOG+": providerClassMissing");
                 return 0;
             }
-            int count = XposedBridge.hookAllMethods(type,"query",new XC_MethodHook() {
-                @Override protected void beforeHookedMethod(MethodHookParam p) {
+            int count = hookAllMethods(type,"query",new HookCallback() {
+                @Override protected void beforeHookedMethod(HookParam p) {
                     if (PROVIDER_TRACE_COUNT.incrementAndGet() <= 80)
-                        XposedBridge.log(LOG+": providerQuery invoked=true inputMatch="+inputMatches(p.args));
+                        log(LOG+": providerQuery invoked=true inputMatch="+inputMatches(p.args));
                 }
-                @Override protected void afterHookedMethod(MethodHookParam p) {
+                @Override protected void afterHookedMethod(HookParam p) {
                     if (PROVIDER_TRACE_COUNT.get() <= 80)
-                        XposedBridge.log(LOG+": providerResult "+cursorShape(p.getResult()));
+                        log(LOG+": providerResult "+cursorShape(p.getResult()));
                 }
-            }).size();
-            XposedBridge.log(LOG+": providerHooks="+count);
+            });
+            log(LOG+": providerHooks="+count);
             return count;
         } catch(Throwable e) {
-            XposedBridge.log(LOG+": providerHookError="+e.getClass().getSimpleName());
+            log(LOG+": providerHookError="+e.getClass().getSimpleName());
             return 0;
         }
     }
     /** Probe only yellowpage/antispam resolver authority; no URL, query or phone data logged. */
-    private static int installResolver(ClassLoader loader) {
+    private int installResolver(ClassLoader loader) {
         try {
-            Class<?> type=XposedHelpers.findClassIfExists("android.content.ContentResolver",loader);
+            Class<?> type=findClassIfExists("android.content.ContentResolver",loader);
             if(type == null) return 0;
-            int count=XposedBridge.hookAllMethods(type,"query",new XC_MethodHook() {
-                @Override protected void beforeHookedMethod(MethodHookParam p) {
+            int count=hookAllMethods(type,"query",new HookCallback() {
+                @Override protected void beforeHookedMethod(HookParam p) {
                     try {
                         if (p.args == null || p.args.length == 0 || p.args[0] == null) return;
-                        Object authority=XposedHelpers.callMethod(p.args[0],"getAuthority");
+                        Object authority=callMethod(p.args[0],"getAuthority");
                         if (!(authority instanceof String)) return;
                         String name=((String)authority).toLowerCase(java.util.Locale.ROOT);
                         if (!name.contains("yellowpage") && !name.contains("antispam")) return;
                         if (RESOLVER_TRACE_COUNT.incrementAndGet() <= 80)
-                            XposedBridge.log(LOG+": resolverQuery relevantAuthority=true inputMatch="+inputMatches(p.args));
+                            log(LOG+": resolverQuery relevantAuthority=true inputMatch="+inputMatches(p.args));
                     } catch(Throwable ignored) {}
                 }
-            }).size();
-            XposedBridge.log(LOG+": resolverHooks="+count);
+            });
+            log(LOG+": resolverHooks="+count);
             return count;
         } catch(Throwable e) {
-            XposedBridge.log(LOG+": resolverHookError="+e.getClass().getSimpleName());
+            log(LOG+": resolverHookError="+e.getClass().getSimpleName());
             return 0;
         }
     }
@@ -406,23 +406,23 @@ public final class HookEntry implements IXposedHookLoadPackage {
             return out.append("]").toString();
         } catch(Throwable e) { return "cursor=true fields=unavailable"; }
     }
-    private static int install(ClassLoader loader,String name,boolean queryResult) {
+    private int install(ClassLoader loader,String name,boolean queryResult) {
         try {
-            Class<?> type=XposedHelpers.findClassIfExists(name,loader);
-            if(type==null) { XposedBridge.log(LOG+": classMissing="+name); return 0; }
+            Class<?> type=findClassIfExists(name,loader);
+            if(type==null) { log(LOG+": classMissing="+name); return 0; }
             int hooked=0;
             hooked+=hook(type,"isAntispam",true);
             hooked+=hook(type,"isMarkedSuspect",true);
             hooked+=hook(type,"getTag",false);
             if(queryResult) hooked+=hook(type,"getAntispamCategoryName",false);
-            XposedBridge.log(LOG+": class="+name+" hookedMethods="+hooked);
+            log(LOG+": class="+name+" hookedMethods="+hooked);
             return hooked;
         } catch(Throwable e) {
-            XposedBridge.log(LOG+": setup failed "+name+" "+e.getClass().getSimpleName());
+            log(LOG+": setup failed "+name+" "+e.getClass().getSimpleName());
             return 0;
         }
     }
-    private static int hook(Class<?> type,String name,boolean flag) {
+    private int hook(Class<?> type,String name,boolean flag) {
         boolean found=false;
         for(Method m:type.getDeclaredMethods()) {
             if(m.getName().equals(name) && m.getParameterTypes().length==0
@@ -430,12 +430,12 @@ public final class HookEntry implements IXposedHookLoadPackage {
         }
         if(!found) return 0;
         try {
-            return XposedBridge.hookAllMethods(type,name,new XC_MethodHook() {
-                @Override protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+            return hookAllMethods(type,name,new HookCallback() {
+                @Override protected void afterHookedMethod(HookParam param) throws Throwable {
                     boolean matched = matches(param.thisObject);
                     // Diagnostic only: never log the telephone number or its digits.
                     int count = TRACE_COUNT.incrementAndGet();
-                    if (count <= 100) XposedBridge.log(LOG+": call="+type.getName()+"."+name+" matched="+matched);
+                    if (count <= 100) log(LOG+": call="+type.getName()+"."+name+" matched="+matched);
                     if (!matched) return;
                     boolean changed = false;
                     if(flag && (param.getResult()==null || param.getResult() instanceof Boolean)) {
@@ -445,19 +445,99 @@ public final class HookEntry implements IXposedHookLoadPackage {
                         param.setResult("Olası spam (TR)");
                         changed = true;
                     }
-                    if (changed) XposedBridge.log(LOG+": override="+name+" matched=true");
+                    if (changed) log(LOG+": override="+name+" matched=true");
                 }
-            }).size();
+            });
         } catch(Throwable ignored) { return 0; }
     }
     private static boolean matches(Object phone) {
         if(phone==null) return false;
-        try { Object n=XposedHelpers.callMethod(phone,"getNormalizedNumber");
+        try { Object n=callMethod(phone,"getNormalizedNumber");
             if(n instanceof String && hasOfflineSpam((String)n)) return true;
         } catch(Throwable ignored) {}
-        try { Object n=XposedHelpers.callMethod(phone,"getNumber");
+        try { Object n=callMethod(phone,"getNumber");
             return n instanceof String && hasOfflineSpam((String)n);
         } catch(Throwable ignored) {}
         return false;
+    }
+
+    /** API 102 hook adapter: performs legacy-style before/after callbacks through
+     * modern libxposed interceptor chains. This adapter does not invoke the legacy Xposed API. */
+    private static final class HookParam {
+        final Object thisObject;
+        final Object[] args;
+        private Object result;
+        HookParam(Object self,Object[] arguments) {
+            thisObject=self;
+            args=arguments;
+        }
+        Object getResult() { return result; }
+        void setResult(Object value) { result=value; }
+    }
+
+    private static class HookCallback {
+        protected void beforeHookedMethod(HookParam param) throws Throwable { }
+        protected void afterHookedMethod(HookParam param) throws Throwable { }
+    }
+
+    /** Install every overload by its actual reflective Method, not by name only. */
+    private int hookAllMethods(Class<?> type,String name,HookCallback callback) {
+        int installed=0;
+        try {
+            for(Method method:type.getDeclaredMethods()) {
+                if(!name.equals(method.getName())) continue;
+                try {
+                    hook(method).setId("yellowpagetr:"+method.toGenericString())
+                        .intercept(chain -> {
+                            HookParam param=new HookParam(chain.getThisObject(),
+                                chain.getArgs().toArray());
+                            try {
+                                callback.beforeHookedMethod(param);
+                            } catch(Throwable callbackError) {
+                                log(LOG+": beforeHookError="+callbackError.getClass().getSimpleName());
+                            }
+                            Object result=chain.proceed();
+                            param.setResult(result);
+                            try {
+                                callback.afterHookedMethod(param);
+                            } catch(Throwable callbackError) {
+                                log(LOG+": afterHookError="+callbackError.getClass().getSimpleName());
+                            }
+                            return param.getResult();
+                        });
+                    installed++;
+                } catch(Throwable error) {
+                    log(LOG+": installError="+name+" type="+error.getClass().getSimpleName());
+                }
+            }
+        } catch(Throwable error) {
+            log(LOG+": methodEnumerationError="+name+" type="+error.getClass().getSimpleName());
+        }
+        return installed;
+    }
+
+    private static Class<?> findClassIfExists(String name,ClassLoader loader) {
+        try { return Class.forName(name,false,loader); }
+        catch(Throwable ignored) { return null; }
+    }
+
+    /** Reflective zero-argument accessor; never logs the returned caller number. */
+    private static Object callMethod(Object object,String methodName) throws Exception {
+        if(object==null) throw new NullPointerException("receiver");
+        Class<?> current=object.getClass();
+        while(current!=null) {
+            try {
+                Method method=current.getDeclaredMethod(methodName);
+                method.setAccessible(true);
+                return method.invoke(object);
+            } catch(NoSuchMethodException ignored) {
+                current=current.getSuperclass();
+            }
+        }
+        throw new NoSuchMethodException(methodName);
+    }
+
+    private static void log(String message) {
+        android.util.Log.i("YellowPageTR",message);
     }
 }

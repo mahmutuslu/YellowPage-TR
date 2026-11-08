@@ -1,8 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <string-array name="yellowpage_recommended_scope">
-        <item>com.android.contacts</item>
-        <item>com.android.incallui</item>
-        <item>com.miui.yellowpage</item>
-    </string-array>
-</resources>
